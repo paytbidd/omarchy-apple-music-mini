@@ -8,7 +8,7 @@ Upstream is MIT. This overlay is MIT too.
 
 ## What you get
 
-- Mac-style miniplayer popup: full-bleed artwork, dark bottom panel, white scrubber and transport, open-in-new instead of an “Open Apple Music” text button
+- Miniplayer popup: full-bleed artwork, themed Omarchy control panel (same chrome as wifi/sound/weather), larger transport, hoverable Up next / Recently played rows, open-in-new instead of an “Open Apple Music” text button
 - Chromium stays playing when the window is on the scratchpad or another workspace
 - Bar puck keeps album art on pause instead of the Chromium product icon
 
