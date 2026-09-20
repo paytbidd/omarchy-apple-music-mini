@@ -1,0 +1,251 @@
+#!/bin/bash
+# Apply, update, or unapply Apple Music Mini tweaks on top of
+# iuliansafta.apple-music.
+
+set -euo pipefail
+
+OVERLAY_ID="payton.apple-music-mini"
+UPSTREAM_ID="iuliansafta.apple-music"
+UPSTREAM_URL="https://github.com/iuliansafta/omarchy-apple-music.git"
+SENTINEL="disable-backgrounding-occluded-windows"
+HYPR_MARK_BEGIN="-- apple-music-mini begin"
+HYPR_MARK_END="-- apple-music-mini end"
+PATCHED_FILES=(
+  AppleMusicModel.js
+  AppleMusicService.qml
+  AppleMusicWidget.qml
+  scripts/apple-music
+  tests/model.test.js
+)
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+OVERLAY_DIR=$(dirname "$SCRIPT_DIR")
+PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
+UPSTREAM_DIR="$PLUGINS_DIR/$UPSTREAM_ID"
+HYPR_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+HYPRLAND_LUA="$HYPR_DIR/hyprland.lua"
+HYPR_SNIPPET="$HYPR_DIR/apple-music-mini.lua"
+
+fail() {
+  echo "apple-music-mini: $*" >&2
+  exit 1
+}
+
+upstream_git() {
+  git -C "$UPSTREAM_DIR" "$@"
+}
+
+applied() {
+  [[ -f $UPSTREAM_DIR/scripts/apple-music ]] &&
+    grep -q "$SENTINEL" "$UPSTREAM_DIR/scripts/apple-music"
+}
+
+ensure_upstream() {
+  if [[ -d $UPSTREAM_DIR/.git ]]; then
+    return 0
+  fi
+  if [[ -e $UPSTREAM_DIR ]]; then
+    fail "upstream plugin exists at $UPSTREAM_DIR but is not a git checkout"
+  fi
+  omarchy plugin add "$UPSTREAM_URL" --yes
+  [[ -d $UPSTREAM_DIR/.git ]] || fail "failed to install $UPSTREAM_ID"
+  if ! omarchy plugin list --json 2>/dev/null |
+    jq -e --arg id "$UPSTREAM_ID" 'any(.[]; .id == $id and .state == "enabled")' >/dev/null; then
+    omarchy plugin enable "$UPSTREAM_ID" --section center || true
+  fi
+}
+
+ensure_hypr_snippet() {
+  mkdir -p "$HYPR_DIR"
+  cp "$OVERLAY_DIR/hypr/apple-music-mini.lua" "$HYPR_SNIPPET"
+
+  [[ -f $HYPRLAND_LUA ]] || fail "missing $HYPRLAND_LUA"
+
+  python3 - "$HYPRLAND_LUA" "$HYPR_MARK_BEGIN" "$HYPR_MARK_END" <<'PY'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+begin, end = sys.argv[2], sys.argv[3]
+lines = path.read_text().splitlines(keepends=True)
+out = []
+i = 0
+while i < len(lines):
+    line = lines[i]
+    if begin in line:
+        i += 1
+        while i < len(lines) and end not in lines[i]:
+            i += 1
+        if i < len(lines):
+            i += 1
+        continue
+    if "Apple Music webapp:" in line:
+        i += 1
+        while i < len(lines) and lines[i].lstrip().startswith("--"):
+            i += 1
+        continue
+    folded = line.replace("\\", "")
+    window = "o.window" in line and "music" in folded and "apple.com" in folded
+    if window:
+        depth = line.count("{") - line.count("}")
+        i += 1
+        while i < len(lines) and depth > 0:
+            depth += lines[i].count("{") - lines[i].count("}")
+            i += 1
+        continue
+    out.append(line)
+    i += 1
+
+text = "".join(out)
+block = f"{begin}\nrequire(\"hypr.apple-music-mini\")\n{end}\n"
+if 'require("hypr.apple-music-mini")' not in text:
+    text = text.rstrip() + "\n\n" + block
+    if not text.endswith("\n"):
+        text += "\n"
+path.write_text(text)
+PY
+
+  hyprctl reload >/dev/null 2>&1 || true
+}
+
+remove_hypr_snippet() {
+  rm -f "$HYPR_SNIPPET"
+  [[ -f $HYPRLAND_LUA ]] || return 0
+  python3 - "$HYPRLAND_LUA" "$HYPR_MARK_BEGIN" "$HYPR_MARK_END" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+begin, end = sys.argv[2], sys.argv[3]
+lines = path.read_text().splitlines(keepends=True)
+out, skipping = [], False
+for line in lines:
+    if begin in line:
+        skipping = True
+        continue
+    if skipping:
+        if end in line:
+            skipping = False
+        continue
+    out.append(line)
+path.write_text("".join(out))
+PY
+  hyprctl reload >/dev/null 2>&1 || true
+}
+
+apply_patches() {
+  local patch
+  shopt -s nullglob
+  local patches=("$OVERLAY_DIR"/patches/*.patch)
+  shopt -u nullglob
+  (( ${#patches[@]} > 0 )) || fail "no patches in $OVERLAY_DIR/patches"
+  for patch in "${patches[@]}"; do
+    git -C "$UPSTREAM_DIR" apply --check "$patch" ||
+      fail "patch does not apply to $UPSTREAM_ID (upstream may have moved on): $patch"
+    git -C "$UPSTREAM_DIR" apply "$patch"
+  done
+}
+
+reload_shell() {
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  omarchy restart shell >/dev/null 2>&1 || true
+}
+
+cmd_status() {
+  echo "overlay:  $OVERLAY_DIR"
+  echo "upstream: $UPSTREAM_DIR"
+  if [[ -d $UPSTREAM_DIR/.git ]]; then
+    echo "revision: $(upstream_git rev-parse --short HEAD)"
+  else
+    echo "revision: (not installed)"
+  fi
+  if applied; then
+    echo "tweaks:   applied"
+  else
+    echo "tweaks:   not applied"
+  fi
+}
+
+cmd_apply() {
+  ensure_upstream
+  if applied; then
+    echo "Apple Music Mini tweaks already applied."
+  else
+    if [[ -n $(upstream_git status --porcelain) ]]; then
+      fail "$UPSTREAM_ID has local changes; commit, stash, or reset them before apply"
+    fi
+    apply_patches
+    echo "Applied Mini tweaks onto $UPSTREAM_ID@$(upstream_git rev-parse --short HEAD)"
+  fi
+  ensure_hypr_snippet
+  if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
+    "$UPSTREAM_DIR/scripts/apple-music" install >/dev/null || true
+  fi
+  reload_shell
+  echo "Done. Click the Apple Music bar puck, or Super+Space → Apple Music."
+}
+
+cmd_unapply() {
+  local purge=0
+  if [[ ${1:-} == "--purge" ]]; then
+    purge=1
+  fi
+  if [[ -d $UPSTREAM_DIR/.git ]]; then
+    upstream_git restore --worktree --staged -- "${PATCHED_FILES[@]}" 2>/dev/null || true
+    # leftover version-only edits from early Mini work
+    upstream_git restore --worktree --staged -- manifest.json 2>/dev/null || true
+    echo "Restored stock $UPSTREAM_ID@$(upstream_git rev-parse --short HEAD)"
+  fi
+  remove_hypr_snippet
+  reload_shell
+  if (( purge )); then
+    if [[ -d $PLUGINS_DIR/$OVERLAY_ID ]]; then
+      omarchy plugin remove "$OVERLAY_ID" --yes 2>/dev/null ||
+        rm -rf "$PLUGINS_DIR/$OVERLAY_ID"
+    fi
+    echo "Removed Apple Music Mini. Upstream Apple Music plugin is still installed."
+  else
+    echo "Unapplied Mini tweaks. Re-apply with: $SCRIPT_DIR/apple-music-mini apply"
+  fi
+}
+
+cmd_update() {
+  [[ -d $OVERLAY_DIR/.git ]] || fail "overlay is not a git checkout"
+  git -C "$OVERLAY_DIR" fetch --quiet origin HEAD
+  if [[ $(git -C "$OVERLAY_DIR" rev-parse HEAD) != $(git -C "$OVERLAY_DIR" rev-parse FETCH_HEAD) ]]; then
+    git -C "$OVERLAY_DIR" merge --ff-only FETCH_HEAD
+    echo "Updated $OVERLAY_ID."
+  else
+    echo "$OVERLAY_ID is up to date."
+  fi
+
+  ensure_upstream
+  git -C "$UPSTREAM_DIR" fetch --quiet origin HEAD
+  git -C "$UPSTREAM_DIR" reset --hard FETCH_HEAD
+  echo "Reset $UPSTREAM_ID to $(upstream_git rev-parse --short HEAD)"
+  apply_patches
+  ensure_hypr_snippet
+  reload_shell
+  echo "Re-applied Mini tweaks onto latest upstream."
+}
+
+usage() {
+  cat <<EOF
+Usage: apple-music-mini {apply|unapply [--purge]|update|status}
+
+  apply             Install/update iuliansafta.apple-music if needed, patch it, add Hyprland rules
+  unapply           Restore stock upstream files and remove Hyprland rules
+  unapply --purge   Also remove the Apple Music Mini overlay plugin
+  update            Pull latest Mini patches and latest upstream, then re-apply
+  status            Show whether tweaks are applied
+EOF
+}
+
+case "${1:-}" in
+  apply) cmd_apply ;;
+  unapply) cmd_unapply "${2:-}" ;;
+  update) cmd_update ;;
+  status) cmd_status ;;
+  -h | --help | help) usage ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

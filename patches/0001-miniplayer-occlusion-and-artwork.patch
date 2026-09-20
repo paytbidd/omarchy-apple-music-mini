@@ -1,0 +1,1032 @@
+diff --git a/AppleMusicModel.js b/AppleMusicModel.js
+index 0d8dd44..89aa57b 100644
+--- a/AppleMusicModel.js
++++ b/AppleMusicModel.js
+@@ -62,14 +62,20 @@ function metadataText(value) {
+     .replace(/</g, "‹").replace(/>/g, "›")
+ }
+ 
+-// Chromium normally publishes either an HTTPS cover or a canonical local
+-// file URI. Reject every other Image source scheme, remote file authorities,
+-// whitespace/control characters, and overlong URLs.
++// Chromium normally publishes either an HTTPS cover or a /tmp dump of one.
++// Reject every other Image source, including Chromium's product logo — MPRIS
++// falls back to that application icon when Media Session metadata is cleared
++// on pause, which is not cover art.
+ function artworkUrl(value) {
+   var url = String(value || "")
+   if (!url || url.length > 2048 || /[\u0000-\u0020\u007f]/.test(url)) return ""
+-  if (/^https:\/\/[^/?#]+(?:[/?#]|$)/i.test(url)) return url
+-  if (/^file:\/\/\/(?!\/)/i.test(url)) return url
++  if (/product_logo/i.test(url)) return ""
++  if (/\/usr\/(lib|share)\//i.test(url) && /chrom/i.test(url)) return ""
++  if (/^https:\/\/[^/?#]+(?:[/?#]|$)/i.test(url)) {
++    if (/(^|\.)gstatic\.com\/chrome/i.test(url)) return ""
++    return url
++  }
++  if (/^file:\/\/\/tmp\//i.test(url)) return url
+   return ""
+ }
+ 
+@@ -99,6 +105,14 @@ function historyLogKey(title, artist) {
+ // title/artist pair so replaying a song moves it to the top instead of adding
+ // another visible row. Title/artist also deduplicates legacy records that do
+ // not carry a MusicKit playback descriptor.
++function historyField(entries, field) {
++  if (!entries || !entries.length) return ""
++  var entry = entries[0]
++  if (!entry || typeof entry !== "object") return ""
++  if (field === "art") return artworkUrl(entry.art)
++  return metadataText(entry[field])
++}
++
+ function uniqueHistoryEntries(entries, cap) {
+   var limit = Number(cap) || 0
+   var result = []
+@@ -334,6 +348,7 @@ if (typeof module !== "undefined") {
+     metadataText: metadataText,
+     artworkUrl: artworkUrl,
+     historyLogKey: historyLogKey,
++    historyField: historyField,
+     uniqueHistoryEntries: uniqueHistoryEntries,
+     historyPlaybackDescriptor: historyPlaybackDescriptor,
+     parseHistoryLines: parseHistoryLines,
+diff --git a/AppleMusicService.qml b/AppleMusicService.qml
+index f1e45e6..a95b1e0 100644
+--- a/AppleMusicService.qml
++++ b/AppleMusicService.qml
+@@ -59,14 +59,23 @@ Item {
+   readonly property var players: Mpris.players ? Mpris.players.values : []
+   readonly property var activePlayer: Model.selectPlayer(players, browserPid)
+   readonly property bool available: activePlayer !== null
+-  readonly property bool hasMedia: available && (title !== "" || artist !== "")
+   readonly property bool playing: available && activePlayer.isPlaying
+-  readonly property string title: available
++  // Chromium often blanks Media Session on pause (or when the window is
++  // occluded). Keep the last real track while the dedicated window lives so
++  // the bar does not flash the Chromium product icon or an empty label.
++  property string heldTitle: ""
++  property string heldArtist: ""
++  property string heldAlbum: ""
++  readonly property string liveTitle: available
+     ? Model.metadataText(activePlayer.trackTitle) : ""
+-  readonly property string artist: available
++  readonly property string liveArtist: available
+     ? Model.metadataText(activePlayer.trackArtist) : ""
+-  readonly property string album: available
++  readonly property string liveAlbum: available
+     ? Model.metadataText(activePlayer.trackAlbum) : ""
++  readonly property string title: liveTitle || (running ? (heldTitle || Model.historyField(recentTracks, "title")) : "")
++  readonly property string artist: liveArtist || (running ? (heldArtist || Model.historyField(recentTracks, "artist")) : "")
++  readonly property string album: liveAlbum || (running ? (heldAlbum || Model.historyField(recentTracks, "album")) : "")
++  readonly property bool hasMedia: title !== "" || artist !== ""
+   // Chromium republishes MPRIS metadata several times per track switch, each
+   // time pointing mpris:artUrl at a new /tmp file and deleting the previous
+   // one within ~600ms. Binding an Image directly to that churn loads files
+@@ -74,7 +83,9 @@ Item {
+   // only once it stops changing, so only the surviving final file is used.
+   readonly property string rawArtUrl: available
+     ? Model.artworkUrl(activePlayer.trackArtUrl) : ""
+-  property string artUrl: ""
++  property string settledArtUrl: ""
++  readonly property string artUrl: settledArtUrl ||
++    (running ? Model.historyField(recentTracks, "art") : "")
+   readonly property real position: {
+     positionRevision
+     return available && activePlayer.positionSupported
+@@ -221,20 +232,31 @@ Item {
+   // before the entry is written, and lastHistoryKey collapses the result.
+   onTitleChanged: historyLogTimer.restart()
+ 
++  onLiveTitleChanged: if (liveTitle !== "") heldTitle = liveTitle
++  onLiveArtistChanged: if (liveArtist !== "") heldArtist = liveArtist
++  onLiveAlbumChanged: if (liveAlbum !== "") heldAlbum = liveAlbum
++  onRunningChanged: {
++    if (!running) {
++      heldTitle = ""
++      heldArtist = ""
++      heldAlbum = ""
++      settledArtUrl = ""
++    }
++  }
++
+   onRawArtUrlChanged: {
+     if (rawArtUrl === "") {
+       artSettleTimer.stop()
+-      artUrl = ""
+-    } else {
+-      artSettleTimer.restart()
++      return
+     }
++    artSettleTimer.restart()
+   }
+ 
+   Timer {
+     id: artSettleTimer
+     interval: 600
+     repeat: false
+-    onTriggered: root.artUrl = root.rawArtUrl
++    onTriggered: root.settledArtUrl = root.rawArtUrl
+   }
+ 
+   Timer {
+diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
+index 94924a8..4822723 100644
+--- a/AppleMusicWidget.qml
++++ b/AppleMusicWidget.qml
+@@ -35,6 +35,11 @@ BarWidget {
+   readonly property string clockOutlineIcon: String.fromCodePoint(0xf0465)
+   readonly property string alertIcon: String.fromCodePoint(0xf0292)
+   readonly property string autoplayIcon: String.fromCodePoint(0xf0ab5)
++  // nf-md-open-in-new — expand the miniplayer into the full web UI.
++  readonly property string openInNewIcon: String.fromCodePoint(0xf03cc)
++  readonly property color miniForeground: "#ffffff"
++  readonly property color miniMuted: Util.alpha("#ffffff", 0.72)
++  readonly property color miniPanel: Util.alpha("#111111", 0.82)
+   readonly property color popupForeground: bar ? bar.foreground : Color.foreground
+   readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
+   readonly property string trackLabel: {
+@@ -269,90 +274,83 @@ BarWidget {
+     bar: root.bar
+     owner: root
+     open: root.popupOpen
+-    contentWidth: popup.fittedContentWidth(Style.space(340))
++    padding: 0
++    contentWidth: popup.fittedContentWidth(Style.space(320))
+     contentHeight: popup.fittedContentHeight(content.implicitHeight)
+ 
+-    // Blurred artwork glow behind the card contents, macOS now-playing
+-    // style. Sits as the first child of PopupCard's content holder so every
+-    // layout child paints on top of it.
+-    Rectangle {
+-      anchors.fill: parent
+-      anchors.margins: -popup.padding
+-      radius: Style.cornerRadius
+-      clip: true
+-      color: Color.popups.background
+-      visible: root.readyArtUrl !== ""
+-
+-      Image {
+-        anchors.fill: parent
+-        anchors.margins: Style.space(24)
+-        source: root.readyArtUrl
+-        fillMode: Image.PreserveAspectCrop
+-        // Loads before the next paint, so the glow never shows a gap while
+-        // the freshly adopted artwork decodes.
+-        asynchronous: false
+-        layer.enabled: true
+-        layer.effect: MultiEffect {
+-          blurEnabled: true
+-          blur: 1.0
+-          blurMax: 48
+-          saturation: 0.5
+-        }
+-      }
+-
+-      Rectangle {
+-        anchors.fill: parent
+-        color: Util.alpha(Color.popups.background, 0.5)
+-      }
+-    }
+-
+     Column {
+       id: content
+-      anchors.fill: parent
+-      spacing: Style.space(12)
++      width: parent.width
++      spacing: 0
+ 
+-      Row {
++      Item {
++        id: artStage
+         width: parent.width
+-        spacing: Style.space(12)
++        height: width
++        clip: true
+ 
+-        BorderSurface {
+-          width: Style.space(88)
+-          height: width
+-          radius: Style.spacing.labelGap
+-          color: Style.normalFillFor(root.popupForeground, Color.accent)
+-          borderSpec: Border.controlSpec("normal", root.popupForeground, Color.accent)
++        Image {
++          id: artwork
++          anchors.fill: parent
++          source: root.readyArtUrl
++          fillMode: Image.PreserveAspectCrop
++          asynchronous: true
++          cache: false
++          visible: status === Image.Ready
++        }
++
++        Rectangle {
++          anchors.fill: parent
++          visible: artwork.status !== Image.Ready
++          color: "#111111"
+ 
+           Image {
+-            id: artwork
+-            anchors.fill: parent
+-            anchors.margins: Style.space(2)
+-            source: root.readyArtUrl
+-            fillMode: Image.PreserveAspectCrop
++            id: miniLogoSource
++            anchors.centerIn: parent
++            width: Style.space(64)
++            height: width
++            source: Qt.resolvedUrl("assets/apple-music-monochrome.svg")
++            sourceSize.width: Math.round(width * Screen.devicePixelRatio)
++            sourceSize.height: Math.round(height * Screen.devicePixelRatio)
++            fillMode: Image.PreserveAspectFit
+             asynchronous: true
+-            cache: false
+-            visible: status === Image.Ready
++            visible: false
++            layer.enabled: true
+           }
+ 
+-          Text {
+-            anchors.centerIn: parent
+-            visible: artwork.status !== Image.Ready
+-            text: "󰝚"
+-            color: root.popupForeground
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.displayLarge
++          MultiEffect {
++            anchors.fill: miniLogoSource
++            source: miniLogoSource
++            colorization: 1.0
++            colorizationColor: root.miniForeground
++          }
++        }
++
++        Rectangle {
++          anchors.left: parent.left
++          anchors.right: parent.right
++          anchors.bottom: parent.bottom
++          height: controlPanel.height + Style.space(72)
++          gradient: Gradient {
++            GradientStop { position: 0.0; color: "transparent" }
++            GradientStop { position: 1.0; color: Util.alpha("#000000", 0.55) }
+           }
+         }
+ 
+         Column {
+-          width: parent.width - Style.space(100)
+-          anchors.verticalCenter: parent.verticalCenter
+-          spacing: Style.space(4)
++          anchors.left: parent.left
++          anchors.right: parent.right
++          anchors.bottom: controlPanel.top
++          anchors.leftMargin: Style.space(14)
++          anchors.rightMargin: Style.space(14)
++          anchors.bottomMargin: Style.space(10)
++          spacing: Style.space(2)
+ 
+           Text {
+             width: parent.width
+             text: root.music && root.music.title ? root.music.title : "Apple Music"
+             textFormat: Text.PlainText
+-            color: root.popupForeground
++            color: root.miniForeground
+             font.family: root.popupFontFamily
+             font.pixelSize: Style.font.subtitle
+             font.bold: true
+@@ -361,360 +359,361 @@ BarWidget {
+ 
+           Text {
+             width: parent.width
+-            text: root.music ? root.music.artist : ""
++            text: root.music && root.music.artist ? root.music.artist : (root.music && root.music.album ? root.music.album : "")
+             textFormat: Text.PlainText
+             visible: text !== ""
+-            color: Qt.darker(root.popupForeground, 1.3)
++            color: root.miniMuted
+             font.family: root.popupFontFamily
+             font.pixelSize: Style.font.body
+             elide: Text.ElideRight
+           }
+-
+-          Text {
+-            width: parent.width
+-            text: root.music ? root.music.album : ""
+-            textFormat: Text.PlainText
+-            visible: text !== ""
+-            color: Qt.darker(root.popupForeground, 1.6)
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.caption
+-            elide: Text.ElideRight
+-          }
+-        }
+-      }
+-
+-      Column {
+-        width: parent.width
+-        spacing: Style.space(4)
+-        visible: !!root.music && root.music.available
+-
+-        Rectangle {
+-          id: progressTrack
+-          width: parent.width
+-          height: Style.space(5)
+-          radius: height / 2
+-          color: Util.alpha(root.popupForeground, 0.2)
+-
+-          Rectangle {
+-            width: parent.width * (root.music ? root.music.progress : 0)
+-            height: parent.height
+-            radius: parent.radius
+-            color: Color.accent
+-          }
+-
+-          MouseArea {
+-            anchors.fill: parent
+-            enabled: !!root.music && root.music.canSeek
+-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+-            onClicked: function(mouse) { root.music.seekFraction(mouse.x / width) }
+-          }
+-        }
+-
+-        Row {
+-          width: parent.width
+-
+-          Text {
+-            id: elapsed
+-            text: root.music ? root.music.elapsedText : "0:00"
+-            color: Qt.darker(root.popupForeground, 1.4)
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.caption
+-          }
+-
+-          Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
+-
+-          Text {
+-            id: duration
+-            text: root.music ? root.music.lengthText : "--:--"
+-            color: Qt.darker(root.popupForeground, 1.4)
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.caption
+-          }
+-        }
+-
+-        Text {
+-          width: parent.width
+-          visible: !!root.music && !root.music.hasValidLength
+-          text: "Apple Music does not expose track duration"
+-          horizontalAlignment: Text.AlignHCenter
+-          color: Qt.darker(root.popupForeground, 1.6)
+-          font.family: root.popupFontFamily
+-          font.pixelSize: Style.font.caption
+-        }
+-      }
+-
+-      Row {
+-        anchors.horizontalCenter: parent.horizontalCenter
+-        spacing: Style.space(8)
+-
+-        Button {
+-          width: Style.space(44)
+-          height: Style.space(40)
+-          iconText: "󰒮"
+-          foreground: root.popupForeground
+-          enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
+-          opacity: enabled ? 1 : 0.4
+-          onClicked: root.music.previous()
+         }
+ 
+         Button {
+-          width: Style.space(44)
+-          height: Style.space(40)
+-          iconText: root.playbackIcon
+-          foreground: root.popupForeground
+-          iconSize: Style.font.iconLarge
+-          enabled: !!root.music && root.music.available
+-          opacity: enabled ? 1 : 0.4
+-          onClicked: root.music.togglePlayback()
+-        }
+-
+-        Button {
+-          width: Style.space(44)
+-          height: Style.space(40)
+-          iconText: "󰒭"
+-          foreground: root.popupForeground
+-          enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
+-          opacity: enabled ? 1 : 0.4
+-          onClicked: root.music.next()
+-        }
+-      }
+-
+-      // Compact secondary controls: ratings/library and playback modes share
+-      // one row, separated visually, so the popup keeps transport prominent
+-      // without spending three full rows on nine actions.
+-      Row {
+-        anchors.horizontalCenter: parent.horizontalCenter
+-        spacing: Style.space(6)
+-
+-        Button {
+-          width: Style.space(36)
++          anchors.top: parent.top
++          anchors.right: parent.right
++          anchors.margins: Style.space(8)
++          width: Style.space(34)
+           height: Style.space(34)
+-          iconText: root.music && root.music.rating === "like"
+-            ? root.heartIcon : root.heartOutlineIcon
+-          foreground: root.music && root.music.rating === "like"
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.bridgeActive
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: "Like"
+-          Accessible.name: "Like current song"
+-          onClicked: root.music.toggleLike()
+-        }
+-
+-        Button {
+-          width: Style.space(36)
+-          height: Style.space(34)
+-          iconText: root.music && root.music.rating === "dislike"
+-            ? root.thumbDownIcon : root.thumbDownOutlineIcon
+-          foreground: root.music && root.music.rating === "dislike"
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.bridgeActive
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: "Suggest less"
+-          Accessible.name: "Suggest less like the current song"
+-          onClicked: root.music.toggleDislike()
+-        }
+-
+-        Button {
+-          width: Style.space(36)
+-          height: Style.space(34)
+-          iconText: !root.music || root.music.libraryState === "unknown" ? root.plusIcon
+-            : root.music.libraryState === "absent" ? root.plusIcon
+-            : root.music.libraryState === "adding" ? root.clockOutlineIcon
+-            : root.music.libraryState === "present" ? root.checkIcon : root.alertIcon
+-          foreground: root.music && root.music.libraryState === "present"
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.libraryState === "absent"
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: !root.music || root.music.libraryState === "unknown"
+-            ? "Library state unavailable"
+-            : root.music.libraryState === "absent" ? "Add to library"
+-            : root.music.libraryState === "adding" ? "Adding to library"
+-            : root.music.libraryState === "present" ? "In your library"
+-            : "Couldn't add to library"
+-          Accessible.name: !root.music || root.music.libraryState === "unknown"
+-            ? "Library state unavailable"
+-            : root.music.libraryState === "absent" ? "Add current song to library"
+-            : root.music.libraryState === "adding" ? "Adding current song to library"
+-            : root.music.libraryState === "present" ? "Current song is in your library"
+-            : "Couldn't add to library"
+-          onClicked: root.music.addToLibrary()
++          iconText: root.openInNewIcon
++          foreground: root.miniForeground
++          background: Util.alpha("#000000", 0.4)
++          tooltipText: "Open Apple Music"
++          Accessible.name: "Open Apple Music window"
++          onClicked: if (root.music) root.music.openAppleMusic()
+         }
+ 
+         Rectangle {
+-          width: 1
+-          height: Style.space(20)
+-          anchors.verticalCenter: parent.verticalCenter
+-          visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
+-          color: Util.alpha(root.popupForeground, 0.18)
+-        }
++          id: controlPanel
++          anchors.left: parent.left
++          anchors.right: parent.right
++          anchors.bottom: parent.bottom
++          height: controlColumn.implicitHeight + Style.space(16)
++          color: root.miniPanel
+ 
+-        Button {
+-          width: Style.space(36)
+-          height: Style.space(34)
+-          visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
+-          iconText: root.shuffleIcon
+-          foreground: root.music && root.music.shuffleMode === true
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.shuffleMode !== null
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: "Shuffle"
+-          Accessible.name: "Shuffle"
+-          onClicked: root.music.setShuffle(root.music.shuffleMode !== true)
+-        }
++          Column {
++            id: controlColumn
++            anchors.left: parent.left
++            anchors.right: parent.right
++            anchors.verticalCenter: parent.verticalCenter
++            anchors.leftMargin: Style.space(14)
++            anchors.rightMargin: Style.space(14)
++            spacing: Style.space(6)
+ 
+-        Button {
+-          width: Style.space(36)
+-          height: Style.space(34)
+-          visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
+-          iconText: !root.music || root.music.repeatMode === "all" ? root.repeatIcon
+-            : root.music.repeatMode === "one" ? root.repeatOnceIcon : root.repeatOffIcon
+-          foreground: root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.repeatMode !== "unknown"
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: root.music && root.music.repeatMode === "one"
+-            ? "Repeat one" : root.music && root.music.repeatMode === "all" ? "Repeat all" : "Repeat off"
+-          Accessible.name: tooltipText
+-          onClicked: root.music.cycleRepeat()
+-        }
+-
+-        Button {
+-          width: Style.space(36)
+-          height: Style.space(34)
+-          visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
+-          iconText: root.autoplayIcon
+-          foreground: root.music && root.music.autoplay === true
+-            ? Color.accent : root.popupForeground
+-          enabled: !!root.music && root.music.autoplay !== null
+-          opacity: enabled ? 1 : 0.4
+-          tooltipText: "Autoplay"
+-          Accessible.name: "Autoplay"
+-          onClicked: root.music.setAutoplay(root.music.autoplay !== true)
+-        }
+-      }
+-
+-      Column {
+-        width: parent.width
+-        spacing: Style.space(4)
+-        visible: root.showQueue && !!root.music && root.music.upNext.length > 0
+-
+-        PanelSeparator { foreground: root.popupForeground }
+-
+-        Text {
+-          width: parent.width
+-          text: "Up next"
+-          color: Qt.darker(root.popupForeground, 1.4)
+-          font.family: root.popupFontFamily
+-          font.pixelSize: Style.font.caption
+-          font.bold: true
+-        }
+-
+-        Repeater {
+-          model: root.showQueue && root.music ? root.music.upNext.slice(0, 6) : []
+-
+-          Item {
+-            id: queueRow
+-            required property var modelData
+-            width: parent.width
+-            height: queueLabel.implicitHeight + Style.space(4)
+-
+-            Text {
+-              id: queueLabel
+-              anchors.verticalCenter: parent.verticalCenter
+-              width: parent.width - queueDuration.implicitWidth - Style.space(10)
+-              text: queueRow.modelData.title +
+-                (queueRow.modelData.artist ? " — " + queueRow.modelData.artist : "")
+-              textFormat: Text.PlainText
+-              color: root.popupForeground
+-              font.family: root.popupFontFamily
+-              font.pixelSize: Style.font.caption
+-              elide: Text.ElideRight
+-            }
+-
+-            Text {
+-              id: queueDuration
+-              anchors.right: parent.right
+-              anchors.verticalCenter: parent.verticalCenter
+-              text: root.music && queueRow.modelData.durationSeconds > 0
+-                ? Model.formatTime(queueRow.modelData.durationSeconds) : ""
+-              color: Qt.darker(root.popupForeground, 1.6)
+-              font.family: root.popupFontFamily
+-              font.pixelSize: Style.font.caption
+-            }
+-
+-            MouseArea {
+-              anchors.fill: parent
+-              cursorShape: Qt.PointingHandCursor
+-              onClicked: root.music.jumpToQueueIndex(queueRow.modelData.index)
+-            }
+-          }
+-        }
+-      }
+-
+-      Column {
+-        width: parent.width
+-        spacing: Style.space(4)
+-        visible: root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0
+-
+-        PanelSeparator { foreground: root.popupForeground }
+-
+-        Text {
+-          width: parent.width
+-          text: "Recently played"
+-          color: Qt.darker(root.popupForeground, 1.4)
+-          font.family: root.popupFontFamily
+-          font.pixelSize: Style.font.caption
+-          font.bold: true
+-        }
+-
+-        Repeater {
+-          model: root.showRecentlyPlayed && root.music
+-            ? root.music.recentTracks.slice(0, 5) : []
+-
+-          Item {
+-            id: historyRow
+-            required property var modelData
+-            width: parent.width
+-            height: historyLabel.implicitHeight + Style.space(4)
+-
+-            Accessible.role: Accessible.ListItem
+-            Accessible.name: historyRow.modelData.title +
+-              (historyRow.modelData.artist ? " — " + historyRow.modelData.artist : "") +
+-              (historyRow.modelData.play ? ", replay" : ", open Apple Music")
+-
+-            Text {
+-              id: historyLabel
+-              anchors.verticalCenter: parent.verticalCenter
++            Rectangle {
++              id: progressTrack
+               width: parent.width
+-              text: historyRow.modelData.title +
+-                (historyRow.modelData.artist ? " — " + historyRow.modelData.artist : "")
+-              textFormat: Text.PlainText
+-              color: Qt.darker(root.popupForeground, 1.3)
+-              font.family: root.popupFontFamily
+-              font.pixelSize: Style.font.caption
+-              elide: Text.ElideRight
++              height: Style.space(4)
++              radius: height / 2
++              color: Util.alpha(root.miniForeground, 0.28)
++
++              Rectangle {
++                width: parent.width * (root.music ? root.music.progress : 0)
++                height: parent.height
++                radius: parent.radius
++                color: root.miniForeground
++              }
++
++              MouseArea {
++                anchors.fill: parent
++                enabled: !!root.music && root.music.canSeek
++                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
++                onClicked: function(mouse) { root.music.seekFraction(mouse.x / width) }
++              }
+             }
+-            MouseArea {
+-              anchors.fill: parent
+-              // Replayable rows carry an exact-song descriptor; legacy rows
+-              // keep the pre-existing focus behavior and must not imply replay.
+-              cursorShape: historyRow.modelData.play
+-                ? Qt.PointingHandCursor : Qt.ArrowCursor
+-              onClicked: if (root.music) {
+-                if (historyRow.modelData.play) root.music.replayTrack(historyRow.modelData)
+-                else root.music.openAppleMusic()
++
++            Row {
++              width: parent.width
++
++              Text {
++                id: elapsed
++                text: root.music ? root.music.elapsedText : "0:00"
++                color: root.miniMuted
++                font.family: root.popupFontFamily
++                font.pixelSize: Style.font.caption
++              }
++
++              Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
++
++              Text {
++                id: duration
++                text: root.music ? root.music.lengthText : "--:--"
++                color: root.miniMuted
++                font.family: root.popupFontFamily
++                font.pixelSize: Style.font.caption
++              }
++            }
++
++            Row {
++              anchors.horizontalCenter: parent.horizontalCenter
++              spacing: Style.space(10)
++
++              Button {
++                width: Style.space(44)
++                height: Style.space(40)
++                iconText: "󰒮"
++                foreground: root.miniForeground
++                enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
++                opacity: enabled ? 1 : 0.4
++                onClicked: root.music.previous()
++              }
++
++              Button {
++                width: Style.space(48)
++                height: Style.space(44)
++                iconText: root.playbackIcon
++                foreground: root.miniForeground
++                iconSize: Style.font.iconLarge
++                enabled: !!root.music && root.music.available
++                opacity: enabled ? 1 : 0.4
++                onClicked: root.music.togglePlayback()
++              }
++
++              Button {
++                width: Style.space(44)
++                height: Style.space(40)
++                iconText: "󰒭"
++                foreground: root.miniForeground
++                enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
++                opacity: enabled ? 1 : 0.4
++                onClicked: root.music.next()
++              }
++            }
++
++            Row {
++              anchors.horizontalCenter: parent.horizontalCenter
++              spacing: Style.space(4)
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                iconText: root.music && root.music.rating === "like"
++                  ? root.heartIcon : root.heartOutlineIcon
++                foreground: root.music && root.music.rating === "like"
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.bridgeActive
++                opacity: enabled ? 1 : 0.4
++                tooltipText: "Like"
++                Accessible.name: "Like current song"
++                onClicked: root.music.toggleLike()
++              }
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                iconText: root.music && root.music.rating === "dislike"
++                  ? root.thumbDownIcon : root.thumbDownOutlineIcon
++                foreground: root.music && root.music.rating === "dislike"
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.bridgeActive
++                opacity: enabled ? 1 : 0.4
++                tooltipText: "Suggest less"
++                Accessible.name: "Suggest less like the current song"
++                onClicked: root.music.toggleDislike()
++              }
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                iconText: !root.music || root.music.libraryState === "unknown" ? root.plusIcon
++                  : root.music.libraryState === "absent" ? root.plusIcon
++                  : root.music.libraryState === "adding" ? root.clockOutlineIcon
++                  : root.music.libraryState === "present" ? root.checkIcon : root.alertIcon
++                foreground: root.music && root.music.libraryState === "present"
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.libraryState === "absent"
++                opacity: enabled ? 1 : 0.4
++                tooltipText: !root.music || root.music.libraryState === "unknown"
++                  ? "Library state unavailable"
++                  : root.music.libraryState === "absent" ? "Add to library"
++                  : root.music.libraryState === "adding" ? "Adding to library"
++                  : root.music.libraryState === "present" ? "In your library"
++                  : "Couldn't add to library"
++                Accessible.name: !root.music || root.music.libraryState === "unknown"
++                  ? "Library state unavailable"
++                  : root.music.libraryState === "absent" ? "Add current song to library"
++                  : root.music.libraryState === "adding" ? "Adding current song to library"
++                  : root.music.libraryState === "present" ? "Current song is in your library"
++                  : "Couldn't add to library"
++                onClicked: root.music.addToLibrary()
++              }
++
++              Rectangle {
++                width: 1
++                height: Style.space(16)
++                anchors.verticalCenter: parent.verticalCenter
++                visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++                color: Util.alpha(root.miniForeground, 0.22)
++              }
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++                iconText: root.shuffleIcon
++                foreground: root.music && root.music.shuffleMode === true
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.shuffleMode !== null
++                opacity: enabled ? 1 : 0.4
++                tooltipText: "Shuffle"
++                Accessible.name: "Shuffle"
++                onClicked: root.music.setShuffle(root.music.shuffleMode !== true)
++              }
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++                iconText: !root.music || root.music.repeatMode === "all" ? root.repeatIcon
++                  : root.music.repeatMode === "one" ? root.repeatOnceIcon : root.repeatOffIcon
++                foreground: root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.repeatMode !== "unknown"
++                opacity: enabled ? 1 : 0.4
++                tooltipText: root.music && root.music.repeatMode === "one"
++                  ? "Repeat one" : root.music && root.music.repeatMode === "all" ? "Repeat all" : "Repeat off"
++                Accessible.name: tooltipText
++                onClicked: root.music.cycleRepeat()
++              }
++
++              Button {
++                width: Style.space(32)
++                height: Style.space(30)
++                visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++                iconText: root.autoplayIcon
++                foreground: root.music && root.music.autoplay === true
++                  ? Color.accent : root.miniForeground
++                enabled: !!root.music && root.music.autoplay !== null
++                opacity: enabled ? 1 : 0.4
++                tooltipText: "Autoplay"
++                Accessible.name: "Autoplay"
++                onClicked: root.music.setAutoplay(root.music.autoplay !== true)
+               }
+             }
+           }
+         }
+       }
+ 
+-      Button {
+-        anchors.horizontalCenter: parent.horizontalCenter
+-        text: "Open Apple Music"
+-        iconText: ""
+-        foreground: root.popupForeground
+-        onClicked: if (root.music) root.music.openAppleMusic()
++      Column {
++        id: extrasColumn
++        width: parent.width
++        visible: (root.showQueue && !!root.music && root.music.upNext.length > 0)
++          || (root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0)
++        topPadding: Style.space(10)
++        leftPadding: Style.space(14)
++        rightPadding: Style.space(14)
++        bottomPadding: Style.space(12)
++        spacing: Style.space(10)
++
++          Column {
++            width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
++            spacing: Style.space(4)
++            visible: root.showQueue && !!root.music && root.music.upNext.length > 0
++
++            Text {
++              width: parent.width
++              text: "Up next"
++              color: Qt.darker(root.popupForeground, 1.4)
++              font.family: root.popupFontFamily
++              font.pixelSize: Style.font.caption
++              font.bold: true
++            }
++
++            Repeater {
++              model: root.showQueue && root.music ? root.music.upNext.slice(0, 6) : []
++
++              Item {
++                id: queueRow
++                required property var modelData
++                width: parent.width
++                height: queueLabel.implicitHeight + Style.space(4)
++
++                Text {
++                  id: queueLabel
++                  anchors.verticalCenter: parent.verticalCenter
++                  width: parent.width - queueDuration.implicitWidth - Style.space(10)
++                  text: queueRow.modelData.title +
++                    (queueRow.modelData.artist ? " — " + queueRow.modelData.artist : "")
++                  textFormat: Text.PlainText
++                  color: root.popupForeground
++                  font.family: root.popupFontFamily
++                  font.pixelSize: Style.font.caption
++                  elide: Text.ElideRight
++                }
++
++                Text {
++                  id: queueDuration
++                  anchors.right: parent.right
++                  anchors.verticalCenter: parent.verticalCenter
++                  text: root.music && queueRow.modelData.durationSeconds > 0
++                    ? Model.formatTime(queueRow.modelData.durationSeconds) : ""
++                  color: Qt.darker(root.popupForeground, 1.6)
++                  font.family: root.popupFontFamily
++                  font.pixelSize: Style.font.caption
++                }
++
++                MouseArea {
++                  anchors.fill: parent
++                  cursorShape: Qt.PointingHandCursor
++                  onClicked: root.music.jumpToQueueIndex(queueRow.modelData.index)
++                }
++              }
++            }
++          }
++
++          Column {
++            width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
++            spacing: Style.space(4)
++            visible: root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0
++
++            Text {
++              width: parent.width
++              text: "Recently played"
++              color: Qt.darker(root.popupForeground, 1.4)
++              font.family: root.popupFontFamily
++              font.pixelSize: Style.font.caption
++              font.bold: true
++            }
++
++            Repeater {
++              model: root.showRecentlyPlayed && root.music
++                ? root.music.recentTracks.slice(0, 5) : []
++
++              Item {
++                id: historyRow
++                required property var modelData
++                width: parent.width
++                height: historyLabel.implicitHeight + Style.space(4)
++
++                Accessible.role: Accessible.ListItem
++                Accessible.name: historyRow.modelData.title +
++                  (historyRow.modelData.artist ? " — " + historyRow.modelData.artist : "") +
++                  (historyRow.modelData.play ? ", replay" : ", open Apple Music")
++
++                Text {
++                  id: historyLabel
++                  anchors.verticalCenter: parent.verticalCenter
++                  width: parent.width
++                  text: historyRow.modelData.title +
++                    (historyRow.modelData.artist ? " — " + historyRow.modelData.artist : "")
++                  textFormat: Text.PlainText
++                  color: Qt.darker(root.popupForeground, 1.3)
++                  font.family: root.popupFontFamily
++                  font.pixelSize: Style.font.caption
++                  elide: Text.ElideRight
++                }
++                MouseArea {
++                  anchors.fill: parent
++                  cursorShape: historyRow.modelData.play
++                    ? Qt.PointingHandCursor : Qt.ArrowCursor
++                  onClicked: if (root.music) {
++                    if (historyRow.modelData.play) root.music.replayTrack(historyRow.modelData)
++                    else root.music.openAppleMusic()
++                  }
++                }
++              }
++            }
++          }
+       }
+     }
+   }
+diff --git a/scripts/apple-music b/scripts/apple-music
+index ed6f8fb..959eaf9 100755
+--- a/scripts/apple-music
++++ b/scripts/apple-music
+@@ -52,8 +52,15 @@ open_app() {
+   fi
+ 
+   mkdir -p "$PROFILE_DIR"
++  # Occlusion / backgrounding pauses Apple Music's <audio> when the window
++  # is on the scratchpad or another workspace. These flags keep playback
++  # going; Hyprland render_unfocused on this class is the compositor half.
+   exec setsid uwsm-app -- "$(browser)" \
+     --ozone-platform=wayland \
++    --disable-backgrounding-occluded-windows \
++    --disable-renderer-backgrounding \
++    --disable-background-timer-throttling \
++    --disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling \
+     --user-data-dir="$PROFILE_DIR" \
+     --load-extension="$EXTENSION_DIR" \
+     --remote-debugging-port=0 \
+diff --git a/tests/model.test.js b/tests/model.test.js
+index 7124e40..f36ca90 100644
+--- a/tests/model.test.js
++++ b/tests/model.test.js
+@@ -37,10 +37,19 @@ assert.equal(model.metadataText("Song <b>title</b>\nnext"), "Song ‹b›title
+ assert.equal(model.metadataText("x".repeat(600)).length, 512)
+ assert.equal(model.artworkUrl("https://example.com/cover.jpg"), "https://example.com/cover.jpg")
+ assert.equal(model.artworkUrl("file:///tmp/cover.jpg"), "file:///tmp/cover.jpg")
++assert.equal(model.artworkUrl("file:///tmp/.org.chromium.Chromium.cover"),
++  "file:///tmp/.org.chromium.Chromium.cover")
+ assert.equal(model.artworkUrl("http://example.com/cover.jpg"), "")
+ assert.equal(model.artworkUrl("data:image/png;base64,AAAA"), "")
+ assert.equal(model.artworkUrl("file://remote/cover.jpg"), "")
+ assert.equal(model.artworkUrl("https://example.com/" + "x".repeat(2048)), "")
++assert.equal(model.artworkUrl("file:///usr/lib/chromium/product_logo_256.png"), "")
++assert.equal(model.artworkUrl("file:///usr/share/icons/hicolor/256x256/apps/chromium.png"), "")
++assert.equal(model.artworkUrl("https://www.gstatic.com/chrome/product_logo.png"), "")
++assert.equal(model.historyField([], "title"), "")
++assert.equal(model.historyField([{ title: "Held", artist: "Band", art: "file:///tmp/a.jpg" }], "title"), "Held")
++assert.equal(model.historyField([{ title: "Held", artist: "Band", art: "file:///tmp/a.jpg" }], "artist"), "Band")
++assert.equal(model.historyField([{ title: "Held", art: "file:///usr/lib/chromium/product_logo_256.png" }], "art"), "")
+ 
+ const historyLines = [
+   JSON.stringify({ ts: 1, title: "A", artist: "X" }),

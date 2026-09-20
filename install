@@ -1,0 +1,13 @@
+#!/bin/bash
+# One-shot install: overlay plugin + latest iuliansafta.apple-music + Mini tweaks.
+set -euo pipefail
+
+OVERLAY_URL="https://github.com/paytbidd/omarchy-apple-music-mini.git"
+OVERLAY_ID="payton.apple-music-mini"
+PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
+
+if [[ ! -d $PLUGINS_DIR/$OVERLAY_ID/.git ]]; then
+  omarchy plugin add "$OVERLAY_URL" --yes
+fi
+
+exec "$PLUGINS_DIR/$OVERLAY_ID/scripts/apple-music-mini" apply

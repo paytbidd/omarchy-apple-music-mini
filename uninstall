@@ -1,0 +1,14 @@
+#!/bin/bash
+# Restore stock iuliansafta.apple-music and remove this overlay.
+set -euo pipefail
+
+OVERLAY_ID="payton.apple-music-mini"
+PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
+SCRIPT="$PLUGINS_DIR/$OVERLAY_ID/scripts/apple-music-mini"
+
+if [[ -x $SCRIPT ]]; then
+  exec "$SCRIPT" unapply --purge
+fi
+
+echo "apple-music-mini: overlay is not installed" >&2
+exit 1
