@@ -152,6 +152,19 @@ reload_shell() {
   omarchy restart shell >/dev/null 2>&1 || true
 }
 
+cmd_quit() {
+  local pid=""
+  if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
+    pid=$("$UPSTREAM_DIR/scripts/apple-music" pid || true)
+  fi
+  if [[ -z $pid ]]; then
+    echo "Apple Music is not running."
+    return 0
+  fi
+  kill "$pid" 2>/dev/null || true
+  echo "Stopped Apple Music."
+}
+
 cmd_status() {
   echo "overlay:  $OVERLAY_DIR"
   echo "upstream: $UPSTREAM_DIR"
@@ -238,6 +251,7 @@ Usage: apple-music-mini {apply|unapply [--purge]|update|status}
   unapply           Restore stock upstream files and remove Hyprland rules
   unapply --purge   Also remove the Apple Music Mini overlay plugin
   update            Pull latest Mini patches and latest upstream, then re-apply
+  quit              Stop the dedicated Apple Music Chromium process
   status            Show whether tweaks are applied
 EOF
 }
@@ -246,6 +260,7 @@ case "${1:-}" in
   apply) cmd_apply ;;
   unapply) cmd_unapply "${2:-}" ;;
   update) cmd_update ;;
+  quit) cmd_quit ;;
   status) cmd_status ;;
   -h | --help | help) usage ;;
   *)
