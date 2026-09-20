@@ -15,7 +15,11 @@ PATCHED_FILES=(
   AppleMusicService.qml
   AppleMusicWidget.qml
   scripts/apple-music
+  scripts/bridge-daemon
+  extension/chromium/duration-bridge.js
   tests/model.test.js
+  tests/duration-bridge.test.js
+  tests/bridge_daemon.test.py
 )
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
