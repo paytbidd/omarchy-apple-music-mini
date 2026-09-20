@@ -17,6 +17,8 @@ PATCHED_FILES=(
   scripts/apple-music
   scripts/bridge-daemon
   extension/chromium/duration-bridge.js
+  extension/chromium/manifest.json
+  extension/chromium/zoom.js
   tests/model.test.js
   tests/duration-bridge.test.js
   tests/bridge_daemon.test.py

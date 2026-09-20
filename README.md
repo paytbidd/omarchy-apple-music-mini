@@ -90,6 +90,7 @@ o.bind(
 ## Notes
 
 - Click the miniplayer artwork to open the full player on the current workspace (unstashes if needed). Super+W sends it to the scratchpad and keeps playback going. Super+S brings the scratchpad back. Super+W still closes every other window.
+- The dedicated Chromium window defaults to 75% page zoom. Click **Playlists** in the sidebar to collapse or expand that list, same idea as the Mac app; the choice sticks across restarts.
 - To actually stop Chromium: `~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini quit`
 - Unapply restores stock Super+W (close) for Apple Music too.
 - If an upstream Apple Music plugin release does not apply, `update` will say so; file an issue on this repo with the upstream revision.

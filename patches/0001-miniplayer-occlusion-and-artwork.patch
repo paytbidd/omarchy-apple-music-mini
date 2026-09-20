@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..58d5f5d 100644
+index c97d961..151c333 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,7 +1119,7 @@ index c97d961..58d5f5d 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,7 +606,21 @@ function handleCommand(payload) {
+@@ -578,8 +606,105 @@ function handleCommand(payload) {
    }
  }
  
@@ -1131,28 +1131,159 @@ index c97d961..58d5f5d 100644
 +  style.textContent =
 +    "html,body{scrollbar-width:none !important;}" +
 +    "*{scrollbar-width:none !important;}" +
-+    "::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}"
++    "::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}" +
++    ".navigation-items--personalized .navigation-items__header{display:flex;align-items:center;gap:8px;cursor:pointer;}" +
++    ".omarchy-playlists-collapsed .navigation-items__list{display:none !important;}"
 +  var host = document.head || document.documentElement
 +  if (host) host.appendChild(style)
 +}
 +
++var PLAYLISTS_COLLAPSED_KEY = "omarchy-apple-music-playlists-collapsed"
++
++function readPlaylistsCollapsed(storage) {
++  try {
++    return String((storage || localStorage).getItem(PLAYLISTS_COLLAPSED_KEY) || "") === "1"
++  } catch (_) {
++    return false
++  }
++}
++
++function writePlaylistsCollapsed(collapsed, storage) {
++  try {
++    (storage || localStorage).setItem(PLAYLISTS_COLLAPSED_KEY, collapsed ? "1" : "0")
++  } catch (_) {}
++}
++
++function playlistsSection(root) {
++  var doc = root || (typeof document !== "undefined" ? document : null)
++  if (!doc || !doc.querySelectorAll) return null
++  var sections = doc.querySelectorAll(".navigation-items--personalized")
++  for (var i = 0; i < sections.length; i++) {
++    var header = sections[i].querySelector(".navigation-items__header")
++    var label = header && (header.textContent || "").trim().split("\n")[0]
++    if (label && /^playlists$/i.test(label)) return sections[i]
++  }
++  return null
++}
++
++function applyPlaylistsCollapsed(section, collapsed) {
++  if (!section) return
++  if (collapsed) section.classList.add("omarchy-playlists-collapsed")
++  else section.classList.remove("omarchy-playlists-collapsed")
++  var header = section.querySelector(".navigation-items__header")
++  if (header) header.setAttribute("aria-expanded", collapsed ? "false" : "true")
++  var toggle = section.querySelector("[data-omarchy-playlists-toggle]")
++  if (toggle) {
++    toggle.textContent = collapsed ? "▸" : "▾"
++    toggle.setAttribute("aria-label", collapsed ? "Show playlists" : "Hide playlists")
++  }
++}
++
++function ensurePlaylistsToggle() {
++  if (typeof document === "undefined") return false
++  var section = playlistsSection(document)
++  if (!section) return false
++  var header = section.querySelector(".navigation-items__header")
++  var list = section.querySelector(".navigation-items__list")
++  if (!header || !list) return false
++  applyPlaylistsCollapsed(section, readPlaylistsCollapsed())
++  if (header.getAttribute("data-omarchy-playlists-ready") === "1") return true
++  header.setAttribute("data-omarchy-playlists-ready", "1")
++  header.setAttribute("role", "button")
++  var toggle = document.createElement("button")
++  toggle.type = "button"
++  toggle.setAttribute("data-omarchy-playlists-toggle", "1")
++  toggle.style.cssText = "margin-inline-start:auto;background:none;border:none;color:inherit;cursor:pointer;opacity:0.7;font-size:12px;line-height:1;padding:0 4px;"
++  header.appendChild(toggle)
++  applyPlaylistsCollapsed(section, readPlaylistsCollapsed())
++  header.addEventListener("click", function(event) {
++    if (event.target && event.target.closest && event.target.closest("a")) return
++    event.preventDefault()
++    var next = !section.classList.contains("omarchy-playlists-collapsed")
++    writePlaylistsCollapsed(next)
++    applyPlaylistsCollapsed(section, next)
++  })
++  return true
++}
++
++function watchPlaylistsToggle() {
++  ensurePlaylistsToggle()
++  if (typeof MutationObserver === "undefined" || !document.documentElement) return
++  if (window.__omarchyPlaylistsObserver) return
++  var observer = new MutationObserver(function() { ensurePlaylistsToggle() })
++  observer.observe(document.documentElement, { childList: true, subtree: true })
++  window.__omarchyPlaylistsObserver = observer
++}
++
  if (typeof window !== "undefined" && typeof document !== "undefined") {
+-  setInterval(bridgeAppleMusicDuration, 1000)
 +  hideAppleMusicScrollbars()
-   setInterval(bridgeAppleMusicDuration, 1000)
++  watchPlaylistsToggle()
++  setInterval(function() {
++    bridgeAppleMusicDuration()
++    ensurePlaylistsToggle()
++  }, 1000)
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
-@@ -617,6 +659,9 @@ if (typeof module !== "undefined") {
+ 
+@@ -617,6 +742,13 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
 +    artworkUrlFromItem: artworkUrlFromItem,
 +    artworkUrlFromMediaSession: artworkUrlFromMediaSession,
 +    hideAppleMusicScrollbars: hideAppleMusicScrollbars,
++    PLAYLISTS_COLLAPSED_KEY: PLAYLISTS_COLLAPSED_KEY,
++    readPlaylistsCollapsed: readPlaylistsCollapsed,
++    writePlaylistsCollapsed: writePlaylistsCollapsed,
++    playlistsSection: playlistsSection,
      handleCommand: handleCommand
    }
  }
+diff --git a/extension/chromium/manifest.json b/extension/chromium/manifest.json
+index 092b302..e21c4f1 100644
+--- a/extension/chromium/manifest.json
++++ b/extension/chromium/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "Omarchy Apple Music Bridge",
+-  "version": "0.2.0",
++  "version": "0.3.0",
+   "description": "Bridges Apple Music Web state (duration, rating, queue) to the Omarchy bar and relays bar commands into the page.",
+   "content_scripts": [
+     {
+@@ -13,6 +13,15 @@
+       ],
+       "run_at": "document_idle",
+       "world": "MAIN"
++    },
++    {
++      "matches": [
++        "https://music.apple.com/*"
++      ],
++      "js": [
++        "zoom.js"
++      ],
++      "run_at": "document_start"
+     }
+   ]
+ }
+diff --git a/extension/chromium/zoom.js b/extension/chromium/zoom.js
+new file mode 100644
+index 0000000..5c7005f
+--- /dev/null
++++ b/extension/chromium/zoom.js
+@@ -0,0 +1,7 @@
++// Isolated-world script: Chromium page zoom (Ctrl +/-), not CSS zoom.
++(function () {
++  if (typeof chrome === "undefined" || !chrome.tabs || typeof chrome.tabs.setZoom !== "function") {
++    return
++  }
++  chrome.tabs.setZoom(0.75)
++})()
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..2b98120 100755
+index ed6f8fb..1b5601a 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
 @@ -27,10 +27,17 @@ pid() {
@@ -1174,10 +1305,58 @@ index ed6f8fb..2b98120 100755
    hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
      hyprctl dispatch focuswindow "address:$address" >/dev/null
  }
-@@ -52,8 +59,16 @@ open_app() {
+@@ -46,14 +53,64 @@ browser() {
+   fi
+ }
+ 
++ensure_default_zoom() {
++  python3 - "$PROFILE_DIR/Default/Preferences" <<'PY'
++import json, math, os, sys
++path = sys.argv[1]
++os.makedirs(os.path.dirname(path), exist_ok=True)
++level = math.log(0.75) / math.log(1.2)
++data = {}
++if os.path.exists(path):
++    try:
++        with open(path, encoding="utf-8") as handle:
++            data = json.load(handle)
++    except Exception:
++        data = {}
++if not isinstance(data, dict):
++    data = {}
++partition = data.setdefault("partition", {})
++if not isinstance(partition, dict):
++    partition = {}
++    data["partition"] = partition
++zoom = partition.get("default_zoom_level")
++if not isinstance(zoom, dict) or not zoom:
++    partition["default_zoom_level"] = {"x": level}
++else:
++    partition["default_zoom_level"] = {key: level for key in zoom}
++hosts = partition.get("per_host_zoom_levels")
++if not isinstance(hosts, dict):
++    hosts = {}
++    partition["per_host_zoom_levels"] = hosts
++bucket_key = next(iter(hosts), "x")
++bucket = hosts.get(bucket_key)
++if not isinstance(bucket, dict):
++    bucket = {}
++    hosts[bucket_key] = bucket
++bucket["music.apple.com"] = level
++tmp = path + ".tmp"
++with open(tmp, "w", encoding="utf-8") as handle:
++    json.dump(data, handle, separators=(",", ":"))
++os.replace(tmp, path)
++PY
++}
++
+ open_app() {
+   if focus; then
+     return
    fi
  
    mkdir -p "$PROFILE_DIR"
++  ensure_default_zoom
 +  # Occlusion / backgrounding pauses Apple Music's <audio> when the window
 +  # is on the scratchpad or another workspace. These flags keep playback
 +  # going; Hyprland render_unfocused on this class is the compositor half.
@@ -1224,10 +1403,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..6893038 100644
+index b8c71e4..c03cd31 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,18 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,29 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1243,6 +1422,17 @@ index b8c71e4..6893038 100644
 +  "https://cdn.example/large.jpg")
 +assert.equal(typeof bridge.hideAppleMusicScrollbars, "function")
 +bridge.hideAppleMusicScrollbars()
++const store = {
++  data: {},
++  getItem: function(key) { return Object.prototype.hasOwnProperty.call(this.data, key) ? this.data[key] : null },
++  setItem: function(key, value) { this.data[key] = String(value) }
++}
++assert.equal(bridge.readPlaylistsCollapsed(store), false)
++bridge.writePlaylistsCollapsed(true, store)
++assert.equal(store.data[bridge.PLAYLISTS_COLLAPSED_KEY], "1")
++assert.equal(bridge.readPlaylistsCollapsed(store), true)
++bridge.writePlaylistsCollapsed(false, store)
++assert.equal(bridge.readPlaylistsCollapsed(store), false)
  assert.equal(bridge.normalizeQueueEntry(null, 0), null)
  assert.equal(bridge.normalizeQueueEntry({ attributes: {} }, 0), null)
  
