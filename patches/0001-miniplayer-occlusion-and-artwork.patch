@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..151c333 100644
+index c97d961..c4d9da3 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,23 +1119,42 @@ index c97d961..151c333 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,8 +606,105 @@ function handleCommand(payload) {
+@@ -578,8 +606,125 @@ function handleCommand(payload) {
    }
  }
  
++var PAGE_CHROME_CSS =
++  "html,body{scrollbar-width:none !important;}" +
++  "*{scrollbar-width:none !important;}" +
++  "::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}" +
++  ".navigation-items--personalized .navigation-items__header{display:flex;align-items:center;gap:8px;cursor:pointer;}" +
++  ".omarchy-playlists-collapsed .navigation-items__list{display:none !important;}" +
++  // Linux has no Music.app; this CTA opens itms:// via xdg-open.
++  "[data-testid=\"native-cta\"],.native-cta{display:none !important;}"
++
 +function hideAppleMusicScrollbars() {
 +  if (typeof document === "undefined") return
-+  if (document.getElementById("omarchy-apple-music-hide-scrollbars")) return
-+  var style = document.createElement("style")
-+  style.id = "omarchy-apple-music-hide-scrollbars"
-+  style.textContent =
-+    "html,body{scrollbar-width:none !important;}" +
-+    "*{scrollbar-width:none !important;}" +
-+    "::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}" +
-+    ".navigation-items--personalized .navigation-items__header{display:flex;align-items:center;gap:8px;cursor:pointer;}" +
-+    ".omarchy-playlists-collapsed .navigation-items__list{display:none !important;}"
-+  var host = document.head || document.documentElement
-+  if (host) host.appendChild(style)
++  var style = document.getElementById("omarchy-apple-music-hide-scrollbars")
++  if (!style) {
++    style = document.createElement("style")
++    style.id = "omarchy-apple-music-hide-scrollbars"
++    var host = document.head || document.documentElement
++    if (host) host.appendChild(style)
++  }
++  if (style) style.textContent = PAGE_CHROME_CSS
++}
++
++function suppressNativeAppCta() {
++  if (typeof document === "undefined" || window.__omarchyNativeCtaGuard) return
++  window.__omarchyNativeCtaGuard = true
++  document.addEventListener("click", function(event) {
++    var target = event.target
++    if (!target || !target.closest) return
++    if (target.closest(".native-cta, [data-testid='native-cta']")) {
++      event.preventDefault()
++      event.stopPropagation()
++    }
++  }, true)
 +}
 +
 +var PLAYLISTS_COLLAPSED_KEY = "omarchy-apple-music-playlists-collapsed"
@@ -1218,6 +1237,7 @@ index c97d961..151c333 100644
  if (typeof window !== "undefined" && typeof document !== "undefined") {
 -  setInterval(bridgeAppleMusicDuration, 1000)
 +  hideAppleMusicScrollbars()
++  suppressNativeAppCta()
 +  watchPlaylistsToggle()
 +  setInterval(function() {
 +    bridgeAppleMusicDuration()
@@ -1226,13 +1246,15 @@ index c97d961..151c333 100644
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
  
-@@ -617,6 +742,13 @@ if (typeof module !== "undefined") {
+@@ -617,6 +762,15 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
 +    artworkUrlFromItem: artworkUrlFromItem,
 +    artworkUrlFromMediaSession: artworkUrlFromMediaSession,
 +    hideAppleMusicScrollbars: hideAppleMusicScrollbars,
++    PAGE_CHROME_CSS: PAGE_CHROME_CSS,
++    suppressNativeAppCta: suppressNativeAppCta,
 +    PLAYLISTS_COLLAPSED_KEY: PLAYLISTS_COLLAPSED_KEY,
 +    readPlaylistsCollapsed: readPlaylistsCollapsed,
 +    writePlaylistsCollapsed: writePlaylistsCollapsed,
@@ -1403,10 +1425,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..c03cd31 100644
+index b8c71e4..34a9e92 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,29 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,30 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1421,6 +1443,7 @@ index b8c71e4..c03cd31 100644
 +  ] }),
 +  "https://cdn.example/large.jpg")
 +assert.equal(typeof bridge.hideAppleMusicScrollbars, "function")
++assert.equal(bridge.PAGE_CHROME_CSS.indexOf("native-cta") !== -1, true)
 +bridge.hideAppleMusicScrollbars()
 +const store = {
 +  data: {},
