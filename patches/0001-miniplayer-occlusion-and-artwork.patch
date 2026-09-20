@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..9c929ff 100644
+index c97d961..58d5f5d 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,17 +1119,40 @@ index c97d961..9c929ff 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -617,6 +645,8 @@ if (typeof module !== "undefined") {
+@@ -578,7 +606,21 @@ function handleCommand(payload) {
+   }
+ }
+ 
++function hideAppleMusicScrollbars() {
++  if (typeof document === "undefined") return
++  if (document.getElementById("omarchy-apple-music-hide-scrollbars")) return
++  var style = document.createElement("style")
++  style.id = "omarchy-apple-music-hide-scrollbars"
++  style.textContent =
++    "html,body{scrollbar-width:none !important;}" +
++    "*{scrollbar-width:none !important;}" +
++    "::-webkit-scrollbar{width:0 !important;height:0 !important;display:none !important;}"
++  var host = document.head || document.documentElement
++  if (host) host.appendChild(style)
++}
++
+ if (typeof window !== "undefined" && typeof document !== "undefined") {
++  hideAppleMusicScrollbars()
+   setInterval(bridgeAppleMusicDuration, 1000)
+   document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
+   window.addEventListener("pageshow", bridgeAppleMusicDuration)
+@@ -617,6 +659,9 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
 +    artworkUrlFromItem: artworkUrlFromItem,
 +    artworkUrlFromMediaSession: artworkUrlFromMediaSession,
++    hideAppleMusicScrollbars: hideAppleMusicScrollbars,
      handleCommand: handleCommand
    }
  }
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..5b5f856 100755
+index ed6f8fb..2b98120 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
 @@ -27,10 +27,17 @@ pid() {
@@ -1151,7 +1174,7 @@ index ed6f8fb..5b5f856 100755
    hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
      hyprctl dispatch focuswindow "address:$address" >/dev/null
  }
-@@ -52,8 +59,15 @@ open_app() {
+@@ -52,8 +59,16 @@ open_app() {
    fi
  
    mkdir -p "$PROFILE_DIR"
@@ -1164,6 +1187,7 @@ index ed6f8fb..5b5f856 100755
 +    --disable-renderer-backgrounding \
 +    --disable-background-timer-throttling \
 +    --disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling \
++    --hide-scrollbars \
      --user-data-dir="$PROFILE_DIR" \
      --load-extension="$EXTENSION_DIR" \
      --remote-debugging-port=0 \
@@ -1200,10 +1224,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..cd02d67 100644
+index b8c71e4..6893038 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,16 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,18 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1217,6 +1241,8 @@ index b8c71e4..cd02d67 100644
 +    { src: "https://cdn.example/large.jpg", sizes: "600x600" }
 +  ] }),
 +  "https://cdn.example/large.jpg")
++assert.equal(typeof bridge.hideAppleMusicScrollbars, "function")
++bridge.hideAppleMusicScrollbars()
  assert.equal(bridge.normalizeQueueEntry(null, 0), null)
  assert.equal(bridge.normalizeQueueEntry({ attributes: {} }, 0), null)
  
