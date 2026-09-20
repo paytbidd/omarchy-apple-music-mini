@@ -156,7 +156,7 @@ index f1e45e6..3b01327 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..c92bfc0 100644
+index 94924a8..48f65c3 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
 @@ -35,6 +35,8 @@ BarWidget {
@@ -168,7 +168,24 @@ index 94924a8..c92bfc0 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -263,459 +265,503 @@ BarWidget {
+@@ -56,6 +58,16 @@ BarWidget {
+   function open() { popupOpen = true }
+   function close() { popupOpen = false }
+   function toggle() { popupOpen = !popupOpen }
++  function openFullPlayer() {
++    popupOpen = false
++    if (music) music.openAppleMusic()
++  }
++  readonly property int miniMaxHeight: {
++    var avail = popup.availableCardHeight
++    var cap = Style.space(640)
++    if (avail > 0) return Math.min(cap, Math.round(avail * 0.7))
++    return cap
++  }
+ 
+   // Last artwork URL that decoded successfully. Chromium hands MPRIS a new
+   // /tmp artwork file several times per track switch and deletes the old
+@@ -263,90 +275,246 @@ BarWidget {
      }
    }
  
@@ -321,10 +338,8 @@ index 94924a8..c92bfc0 100644
      owner: root
      open: root.popupOpen
 -    contentWidth: popup.fittedContentWidth(Style.space(340))
-+    padding: 0
-+    contentWidth: popup.fittedContentWidth(Style.space(320))
-     contentHeight: popup.fittedContentHeight(content.implicitHeight)
- 
+-    contentHeight: popup.fittedContentHeight(content.implicitHeight)
+-
 -    // Blurred artwork glow behind the card contents, macOS now-playing
 -    // style. Sits as the first child of PopupCard's content holder so every
 -    // layout child paints on top of it.
@@ -358,7 +373,10 @@ index 94924a8..c92bfc0 100644
 -        color: Util.alpha(Color.popups.background, 0.5)
 -      }
 -    }
--
++    padding: 0
++    contentWidth: popup.fittedContentWidth(Style.space(320))
++    contentHeight: popup.fittedContentHeight(content.implicitHeight, root.miniMaxHeight)
+ 
      Column {
        id: content
 -      anchors.fill: parent
@@ -432,6 +450,29 @@ index 94924a8..c92bfc0 100644
 +            source: miniLogoSource
 +            colorization: 1.0
 +            colorizationColor: root.popupForeground
+           }
+         }
+ 
++        MouseArea {
++          id: artClick
++          anchors.fill: parent
++          hoverEnabled: true
++          cursorShape: Qt.PointingHandCursor
++          onClicked: root.openFullPlayer()
++        }
++
++        Rectangle {
++          anchors.fill: parent
++          color: Util.alpha(Color.popups.background, artClick.containsMouse ? 0.5 : 0)
++          Behavior on color { ColorAnimation { duration: 80 } }
++
++          Text {
++            anchors.centerIn: parent
++            visible: artClick.containsMouse
++            text: root.openInNewIcon
++            color: root.popupForeground
++            font.family: root.popupFontFamily
++            font.pixelSize: Style.font.display
 +          }
 +        }
 +      }
@@ -445,81 +486,30 @@ index 94924a8..c92bfc0 100644
 +        bottomPadding: Style.space(12)
 +        spacing: Style.space(10)
 +
-+        Item {
-+          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
-+          implicitHeight: Math.max(titleBlock.implicitHeight, openBtn.implicitHeight)
-+
-+          Column {
-+            id: titleBlock
-+            anchors.left: parent.left
-+            anchors.right: openBtn.left
-+            anchors.rightMargin: Style.space(8)
-+            anchors.verticalCenter: parent.verticalCenter
-+            spacing: Style.space(2)
-+
-+            Text {
-+              width: parent.width
-+              text: root.music && root.music.title ? root.music.title : "Apple Music"
-+              textFormat: Text.PlainText
-+              color: root.popupForeground
-+              font.family: root.popupFontFamily
-+              font.pixelSize: Style.font.subtitle
-+              font.bold: true
-+              elide: Text.ElideRight
-+            }
-+
-+            Text {
-+              width: parent.width
-+              text: root.music && root.music.artist
-+                ? root.music.artist
-+                : (root.music && root.music.album ? root.music.album : "")
-+              textFormat: Text.PlainText
-+              visible: text !== ""
-+              color: Qt.darker(root.popupForeground, 1.3)
-+              font.family: root.popupFontFamily
-+              font.pixelSize: Style.font.body
-+              elide: Text.ElideRight
-+            }
-+          }
-+
-+          MiniButton {
-+            id: openBtn
-+            anchors.right: parent.right
-+            anchors.verticalCenter: parent.verticalCenter
-+            iconText: root.openInNewIcon
-+            iconSize: Style.font.iconLarge
-+            tooltipText: "Open Apple Music"
-+            onClicked: if (root.music) root.music.openAppleMusic()
-           }
-         }
- 
          Column {
 -          width: parent.width - Style.space(100)
 -          anchors.verticalCenter: parent.verticalCenter
+-          spacing: Style.space(4)
 +          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
-           spacing: Style.space(4)
++          spacing: Style.space(2)
  
--          Text {
--            width: parent.width
--            text: root.music && root.music.title ? root.music.title : "Apple Music"
--            textFormat: Text.PlainText
--            color: root.popupForeground
--            font.family: root.popupFontFamily
--            font.pixelSize: Style.font.subtitle
--            font.bold: true
--            elide: Text.ElideRight
--          }
--
--          Text {
--            width: parent.width
+           Text {
+             width: parent.width
+@@ -361,7 +529,9 @@ BarWidget {
+ 
+           Text {
+             width: parent.width
 -            text: root.music ? root.music.artist : ""
--            textFormat: Text.PlainText
--            visible: text !== ""
--            color: Qt.darker(root.popupForeground, 1.3)
--            font.family: root.popupFontFamily
--            font.pixelSize: Style.font.body
--            elide: Text.ElideRight
--          }
++            text: root.music && root.music.artist
++              ? root.music.artist
++              : (root.music && root.music.album ? root.music.album : "")
+             textFormat: Text.PlainText
+             visible: text !== ""
+             color: Qt.darker(root.popupForeground, 1.3)
+@@ -369,352 +539,259 @@ BarWidget {
+             font.pixelSize: Style.font.body
+             elide: Text.ElideRight
+           }
 -
 -          Text {
 -            width: parent.width
@@ -531,9 +521,9 @@ index 94924a8..c92bfc0 100644
 -            font.pixelSize: Style.font.caption
 -            elide: Text.ElideRight
 -          }
--        }
+         }
 -      }
--
+ 
 -      Column {
 -        width: parent.width
 -        spacing: Style.space(4)
@@ -545,7 +535,10 @@ index 94924a8..c92bfc0 100644
 -          height: Style.space(5)
 -          radius: height / 2
 -          color: Util.alpha(root.popupForeground, 0.2)
--
++        Column {
++          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
++          spacing: Style.space(4)
+ 
            Rectangle {
 -            width: parent.width * (root.music ? root.music.progress : 0)
 -            height: parent.height
@@ -742,9 +735,25 @@ index 94924a8..c92bfc0 100644
  
 -      Row {
 -        anchors.horizontalCenter: parent.horizontalCenter
++      Flickable {
++        id: extrasFlick
++        width: parent.width
++        clip: true
++        boundsBehavior: Flickable.StopAtBounds
++        visible: extrasColumn.visible
++        height: {
++          if (!extrasColumn.visible) return 0
++          var extras = extrasColumn.implicitHeight
++          var used = artStage.height + controlPanel.implicitHeight
++          var budget = Math.max(0, root.miniMaxHeight - used)
++          return Math.min(extras, budget)
++        }
++        contentWidth: width
++        contentHeight: extrasColumn.implicitHeight
++
 +      Column {
 +        id: extrasColumn
-+        width: parent.width
++        width: extrasFlick.width
 +        visible: (root.showQueue && !!root.music && root.music.upNext.length > 0)
 +          || (root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0)
 +        topPadding: 0
@@ -1040,6 +1049,7 @@ index 94924a8..c92bfc0 100644
 -                ? Qt.PointingHandCursor : Qt.ArrowCursor
 -              onClicked: if (root.music) {
 -                if (historyRow.modelData.play) root.music.replayTrack(historyRow.modelData)
+-                else root.music.openAppleMusic()
 +            TrackRow {
 +              required property var modelData
 +              titleText: modelData.title || ""
@@ -1047,7 +1057,7 @@ index 94924a8..c92bfc0 100644
 +              playable: !!modelData.play
 +              onActivated: if (root.music) {
 +                if (modelData.play) root.music.replayTrack(modelData)
-                 else root.music.openAppleMusic()
++                else root.openFullPlayer()
                }
              }
            }
@@ -1060,10 +1070,9 @@ index 94924a8..c92bfc0 100644
 -        iconText: ""
 -        foreground: root.popupForeground
 -        onClicked: if (root.music) root.music.openAppleMusic()
--      }
+       }
      }
    }
- }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
 index c97d961..9c929ff 100644
 --- a/extension/chromium/duration-bridge.js
@@ -1120,10 +1129,29 @@ index c97d961..9c929ff 100644
    }
  }
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..959eaf9 100755
+index ed6f8fb..5b5f856 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
-@@ -52,8 +52,15 @@ open_app() {
+@@ -27,10 +27,17 @@ pid() {
+ }
+ 
+ focus() {
+-  local client address
++  local client address workspace name
+   client=$(window || true)
+   [[ -n $client ]] || return 1
+   address=$(jq -r '.address' <<<"$client")
++  name=$(jq -r '.workspace.name' <<<"$client")
++  workspace=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id')
++  # Unstash onto the current workspace so Super+W hides it the same way
++  # as a manual launch, instead of only revealing the scratchpad overlay.
++  if [[ ${name:-} == special:* && ${workspace:-} != "" && ${workspace:-} != "null" ]]; then
++    hyprctl dispatch movetoworkspace "$workspace,address:$address" >/dev/null 2>&1 || true
++  fi
+   hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
+     hyprctl dispatch focuswindow "address:$address" >/dev/null
+ }
+@@ -52,8 +59,15 @@ open_app() {
    fi
  
    mkdir -p "$PROFILE_DIR"

@@ -10,9 +10,11 @@ o.window("^.+-music\\.apple\\.com__.*$", {
 })
 
 -- Super+W is Close window everywhere else. For Apple Music, send it to the
--- scratchpad instead so Chromium keeps playing. Super+S brings it back.
--- This file is dropped on unapply, so a full Hyprland reload restores the
--- default Super+W bind from Omarchy.
+-- scratchpad instead so Chromium keeps playing. Opening the full player
+-- from the miniplayer moves it onto the current workspace first, so Super+W
+-- stashes it the same way as a manual launch. Super+S still toggles the
+-- scratchpad. This file is dropped on unapply, so a full Hyprland reload
+-- restores the default Super+W bind from Omarchy.
 hl.unbind("SUPER + W")
 o.bind("SUPER + W", "Close window", function()
   local window = hl.get_active_window()
