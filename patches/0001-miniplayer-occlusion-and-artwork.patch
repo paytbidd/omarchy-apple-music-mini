@@ -156,7 +156,7 @@ index f1e45e6..3b01327 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..dfaf6a5 100644
+index 94924a8..652b6c6 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
 @@ -35,6 +35,8 @@ BarWidget {
@@ -168,11 +168,69 @@ index 94924a8..dfaf6a5 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -263,90 +265,184 @@ BarWidget {
+@@ -263,90 +265,245 @@ BarWidget {
      }
    }
  
-+  component TrackRow: Rectangle {
++  component MiniButton: BorderSurface {
++    id: miniBtn
++    property string iconText: ""
++    property real iconSize: Style.font.icon
++    property bool enabled: true
++    property bool active: false
++    property string tooltipText: ""
++    property real horizontalPadding: Style.space(10)
++    property real verticalPadding: Style.space(8)
++    property color iconColor: active ? Color.accent : root.popupForeground
++    signal clicked()
++
++    readonly property bool hot: buttonMouse.containsMouse && enabled
++
++    implicitWidth: glyph.implicitWidth + horizontalPadding * 2
++    implicitHeight: Math.max(Style.space(34), glyph.implicitHeight + verticalPadding * 2)
++    radius: Style.cornerRadius
++    opacity: enabled ? 1 : 0.4
++    color: !enabled ? "transparent"
++      : buttonMouse.pressed ? Style.pressedFillFor(root.popupForeground, Color.accent)
++      : (hot || active) ? Style.selectedFillFor(root.popupForeground, Color.accent)
++      : Style.normalFillFor(root.popupForeground, Color.accent)
++    borderSpec: !enabled ? Border.none()
++      : (hot || buttonMouse.pressed)
++        ? Border.controlSpec("hover-cursor", root.popupForeground, Color.accent)
++        : (active
++          ? Border.controlSpec("selected", root.popupForeground, Color.accent)
++          : Border.controlSpec("normal", root.popupForeground, Color.accent))
++
++    Behavior on color { ColorAnimation { duration: 80 } }
++
++    Text {
++      id: glyph
++      anchors.centerIn: parent
++      textFormat: Text.PlainText
++      text: miniBtn.iconText
++      color: miniBtn.iconColor
++      font.family: root.popupFontFamily
++      font.pixelSize: miniBtn.iconSize
++    }
++
++    MouseArea {
++      id: buttonMouse
++      anchors.fill: parent
++      hoverEnabled: true
++      enabled: miniBtn.enabled
++      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
++      Accessible.role: Accessible.Button
++      Accessible.name: miniBtn.tooltipText !== "" ? miniBtn.tooltipText : miniBtn.iconText
++      onClicked: miniBtn.clicked()
++      onContainsMouseChanged: {
++        if (!root.bar || miniBtn.tooltipText === "") return
++        if (containsMouse) root.bar.showTooltip(miniBtn, miniBtn.tooltipText)
++        else root.bar.hideTooltip(miniBtn)
++      }
++    }
++  }
++
++  component TrackRow: BorderSurface {
 +    id: trackRow
 +    property string titleText: ""
 +    property string detailText: ""
@@ -180,14 +238,19 @@ index 94924a8..dfaf6a5 100644
 +    property bool playable: true
 +    signal activated()
 +
-+    width: parent ? parent.width : 0
-+    radius: Style.spacing.labelGap
-+    color: trackMouse.containsMouse
-+      ? Style.hoverFillFor(root.popupForeground, Color.accent)
-+      : "transparent"
-+    implicitHeight: trackInner.implicitHeight + Style.space(14)
++    readonly property bool hot: trackMouse.containsMouse
 +
-+    Behavior on color { ColorAnimation { duration: 120 } }
++    width: parent ? parent.width : 0
++    radius: Style.cornerRadius
++    implicitHeight: trackInner.implicitHeight + Style.space(16)
++    color: hot
++      ? Style.selectedFillFor(root.popupForeground, Color.accent)
++      : "transparent"
++    borderSpec: hot
++      ? Border.controlSpec("hover-cursor", root.popupForeground, Color.accent)
++      : Border.none()
++
++    Behavior on color { ColorAnimation { duration: 80 } }
 +
 +    Row {
 +      id: trackInner
@@ -209,6 +272,7 @@ index 94924a8..dfaf6a5 100644
 +          color: root.popupForeground
 +          font.family: root.popupFontFamily
 +          font.pixelSize: Style.font.bodySmall
++          font.bold: trackRow.hot
 +          elide: Text.ElideRight
 +        }
 +
@@ -217,7 +281,7 @@ index 94924a8..dfaf6a5 100644
 +          visible: trackRow.detailText !== ""
 +          text: trackRow.detailText
 +          textFormat: Text.PlainText
-+          color: Qt.darker(root.popupForeground, 1.5)
++          color: Qt.darker(root.popupForeground, trackRow.hot ? 1.2 : 1.5)
 +          font.family: root.popupFontFamily
 +          font.pixelSize: Style.font.caption
 +          elide: Text.ElideRight
@@ -229,7 +293,7 @@ index 94924a8..dfaf6a5 100644
 +        visible: trackRow.trailingText !== ""
 +        text: trackRow.trailingText
 +        textFormat: Text.PlainText
-+        color: Qt.darker(root.popupForeground, 1.6)
++        color: Qt.darker(root.popupForeground, trackRow.hot ? 1.2 : 1.6)
 +        font.family: root.popupFontFamily
 +        font.pixelSize: Style.font.caption
 +        anchors.verticalCenter: parent.verticalCenter
@@ -381,18 +445,15 @@ index 94924a8..dfaf6a5 100644
 +          }
 +        }
 +
-+        Button {
++        MiniButton {
 +          anchors.top: parent.top
 +          anchors.right: parent.right
 +          anchors.margins: Style.space(8)
 +          iconText: root.openInNewIcon
 +          iconSize: Style.font.iconLarge
-+          foreground: root.popupForeground
-+          background: Util.alpha(Color.popups.background, 0.86)
 +          horizontalPadding: Style.space(10)
 +          verticalPadding: Style.space(8)
 +          tooltipText: "Open Apple Music"
-+          Accessible.name: "Open Apple Music window"
 +          onClicked: if (root.music) root.music.openAppleMusic()
 +        }
 +      }
@@ -415,7 +476,7 @@ index 94924a8..dfaf6a5 100644
  
            Text {
              width: parent.width
-@@ -361,7 +457,9 @@ BarWidget {
+@@ -361,7 +518,9 @@ BarWidget {
  
            Text {
              width: parent.width
@@ -426,7 +487,7 @@ index 94924a8..dfaf6a5 100644
              textFormat: Text.PlainText
              visible: text !== ""
              color: Qt.darker(root.popupForeground, 1.3)
-@@ -369,353 +467,281 @@ BarWidget {
+@@ -369,353 +528,243 @@ BarWidget {
              font.pixelSize: Style.font.body
              elide: Text.ElideRight
            }
@@ -524,26 +585,24 @@ index 94924a8..dfaf6a5 100644
 -            color: Qt.darker(root.popupForeground, 1.4)
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
-+          Button {
++          MiniButton {
 +            iconText: "󰒮"
 +            iconSize: Style.font.iconLarge
-+            foreground: root.popupForeground
 +            horizontalPadding: Style.space(12)
 +            verticalPadding: Style.space(8)
 +            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
-+            opacity: enabled ? 1 : 0.4
++            tooltipText: "Previous"
 +            onClicked: root.music.previous()
            }
  
 -          Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
-+          Button {
++          MiniButton {
 +            iconText: root.playbackIcon
 +            iconSize: Style.font.heading
-+            foreground: root.popupForeground
 +            horizontalPadding: Style.space(16)
 +            verticalPadding: Style.space(10)
 +            enabled: !!root.music && root.music.available
-+            opacity: enabled ? 1 : 0.4
++            tooltipText: root.music && root.music.playing ? "Pause" : "Play"
 +            onClicked: root.music.togglePlayback()
 +          }
  
@@ -553,14 +612,13 @@ index 94924a8..dfaf6a5 100644
 -            color: Qt.darker(root.popupForeground, 1.4)
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
-+          Button {
++          MiniButton {
 +            iconText: "󰒭"
 +            iconSize: Style.font.iconLarge
-+            foreground: root.popupForeground
 +            horizontalPadding: Style.space(12)
 +            verticalPadding: Style.space(8)
 +            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
-+            opacity: enabled ? 1 : 0.4
++            tooltipText: "Next"
 +            onClicked: root.music.next()
            }
          }
@@ -577,59 +635,39 @@ index 94924a8..dfaf6a5 100644
 +          anchors.horizontalCenter: parent.horizontalCenter
 +          spacing: Style.space(6)
 +
-+          Button {
++          MiniButton {
 +            iconText: root.music && root.music.rating === "like"
 +              ? root.heartIcon : root.heartOutlineIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && root.music.rating === "like"
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && root.music.rating === "like"
 +            enabled: !!root.music && root.music.bridgeActive
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: "Like"
-+            Accessible.name: "Like current song"
 +            onClicked: root.music.toggleLike()
 +          }
 +
-+          Button {
++          MiniButton {
 +            iconText: root.music && root.music.rating === "dislike"
 +              ? root.thumbDownIcon : root.thumbDownOutlineIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && root.music.rating === "dislike"
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && root.music.rating === "dislike"
 +            enabled: !!root.music && root.music.bridgeActive
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: "Suggest less"
-+            Accessible.name: "Suggest less like the current song"
 +            onClicked: root.music.toggleDislike()
 +          }
 +
-+          Button {
++          MiniButton {
 +            iconText: !root.music || root.music.libraryState === "unknown" ? root.plusIcon
 +              : root.music.libraryState === "absent" ? root.plusIcon
 +              : root.music.libraryState === "adding" ? root.clockOutlineIcon
 +              : root.music.libraryState === "present" ? root.checkIcon : root.alertIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && root.music.libraryState === "present"
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && root.music.libraryState === "present"
 +            enabled: !!root.music && root.music.libraryState === "absent"
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: !root.music || root.music.libraryState === "unknown"
 +              ? "Library state unavailable"
 +              : root.music.libraryState === "absent" ? "Add to library"
 +              : root.music.libraryState === "adding" ? "Adding to library"
 +              : root.music.libraryState === "present" ? "In your library"
-+              : "Couldn't add to library"
-+            Accessible.name: !root.music || root.music.libraryState === "unknown"
-+              ? "Library state unavailable"
-+              : root.music.libraryState === "absent" ? "Add current song to library"
-+              : root.music.libraryState === "adding" ? "Adding current song to library"
-+              : root.music.libraryState === "present" ? "Current song is in your library"
 +              : "Couldn't add to library"
 +            onClicked: root.music.addToLibrary()
 +          }
@@ -642,50 +680,35 @@ index 94924a8..dfaf6a5 100644
 +            color: Util.alpha(root.popupForeground, 0.18)
 +          }
 +
-+          Button {
++          MiniButton {
 +            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
 +            iconText: root.shuffleIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && root.music.shuffleMode === true
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && root.music.shuffleMode === true
 +            enabled: !!root.music && root.music.shuffleMode !== null
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: "Shuffle"
-+            Accessible.name: "Shuffle"
 +            onClicked: root.music.setShuffle(root.music.shuffleMode !== true)
 +          }
 +
-+          Button {
++          MiniButton {
 +            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
 +            iconText: !root.music || root.music.repeatMode === "all" ? root.repeatIcon
 +              : root.music.repeatMode === "one" ? root.repeatOnceIcon : root.repeatOffIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
 +            enabled: !!root.music && root.music.repeatMode !== "unknown"
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: root.music && root.music.repeatMode === "one"
 +              ? "Repeat one" : root.music && root.music.repeatMode === "all" ? "Repeat all" : "Repeat off"
-+            Accessible.name: tooltipText
 +            onClicked: root.music.cycleRepeat()
 +          }
 +
-+          Button {
++          MiniButton {
 +            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
 +            iconText: root.autoplayIcon
 +            iconSize: Style.font.icon
-+            foreground: root.music && root.music.autoplay === true
-+              ? Color.accent : root.popupForeground
-+            horizontalPadding: Style.space(10)
-+            verticalPadding: Style.space(7)
++            active: !!root.music && root.music.autoplay === true
 +            enabled: !!root.music && root.music.autoplay !== null
-+            opacity: enabled ? 1 : 0.4
 +            tooltipText: "Autoplay"
-+            Accessible.name: "Autoplay"
 +            onClicked: root.music.setAutoplay(root.music.autoplay !== true)
 +          }
          }
