@@ -156,24 +156,28 @@ index f1e45e6..3b01327 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..e0eda4f 100644
+index 94924a8..0436194 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
-@@ -18,6 +18,13 @@ BarWidget {
+@@ -18,6 +18,17 @@ BarWidget {
    readonly property bool showQueue: setting("showQueue", true)
    readonly property bool showRecentlyPlayed: setting("showRecentlyPlayed", true)
    readonly property bool showPlaybackModes: setting("showPlaybackModes", true)
++  readonly property var artworkPresets: [64, 96, 128, 160, 200, 260, 320]
 +  property int artworkSizeOverride: 0
 +  readonly property int artworkSize: {
 +    var value = root.artworkSizeOverride > 0
 +      ? root.artworkSizeOverride : Number(setting("artworkSize", 260))
 +    if (!(value > 0)) value = 260
-+    return Math.round(Math.max(180, Math.min(420, value)))
++    return root.snapArtworkSize(value)
 +  }
++  readonly property bool compactPlayer: artworkSize <= 160
++  property bool settingsOpen: false
++  readonly property string cogIcon: String.fromCodePoint(0xf0493)
    // Nerd Font nf-md glyphs, resolved from CaskaydiaMono Nerd Font's cmap:
    // md-heart, md-heart_outline, md-thumb_down, md-thumb_down_outline
    readonly property string heartIcon: String.fromCodePoint(0xf02d1)
-@@ -35,6 +42,8 @@ BarWidget {
+@@ -35,6 +46,8 @@ BarWidget {
    readonly property string clockOutlineIcon: String.fromCodePoint(0xf0465)
    readonly property string alertIcon: String.fromCodePoint(0xf0292)
    readonly property string autoplayIcon: String.fromCodePoint(0xf0ab5)
@@ -182,17 +186,38 @@ index 94924a8..e0eda4f 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -56,6 +65,24 @@ BarWidget {
+@@ -54,8 +67,43 @@ BarWidget {
+   readonly property bool tooltipHovered: visible && opacity > 0 && barMouseArea.containsMouse
+ 
    function open() { popupOpen = true }
-   function close() { popupOpen = false }
-   function toggle() { popupOpen = !popupOpen }
+-  function close() { popupOpen = false }
+-  function toggle() { popupOpen = !popupOpen }
++  function close() { popupOpen = false; settingsOpen = false }
++  function toggle() { popupOpen = !popupOpen; if (!popupOpen) settingsOpen = false }
 +  function openFullPlayer() {
 +    popupOpen = false
++    settingsOpen = false
 +    if (music) music.openAppleMusic()
 +  }
 +
++  function snapArtworkSize(value) {
++    var presets = root.artworkPresets
++    var n = Number(value)
++    if (!(n > 0)) n = 260
++    var best = presets[0]
++    var bestDist = Math.abs(n - best)
++    for (var i = 1; i < presets.length; i++) {
++      var d = Math.abs(n - presets[i])
++      if (d < bestDist) {
++        best = presets[i]
++        bestDist = d
++      }
++    }
++    return best
++  }
++
 +  function setArtworkSize(value) {
-+    var next = Math.round(Math.max(180, Math.min(420, Number(value))))
++    var next = root.snapArtworkSize(value)
 +    root.artworkSizeOverride = next
 +    Quickshell.execDetached([
 +      "omarchy", "bar", "set", "iuliansafta.apple-music", "artworkSize", String(next)
@@ -207,7 +232,7 @@ index 94924a8..e0eda4f 100644
  
    // Last artwork URL that decoded successfully. Chromium hands MPRIS a new
    // /tmp artwork file several times per track switch and deletes the old
-@@ -263,90 +290,246 @@ BarWidget {
+@@ -263,458 +311,611 @@ BarWidget {
      }
    }
  
@@ -396,7 +421,9 @@ index 94924a8..e0eda4f 100644
 -      }
 -    }
 +    padding: 0
-+    contentWidth: popup.fittedContentWidth(root.artworkSize)
++    contentWidth: popup.fittedContentWidth(root.compactPlayer
++      ? Math.max(root.artworkSize + 220, 320)
++      : root.artworkSize)
 +    contentHeight: popup.fittedContentHeight(content.implicitHeight, root.miniMaxHeight)
  
      Column {
@@ -408,11 +435,12 @@ index 94924a8..e0eda4f 100644
  
 -      Row {
 +      Item {
-+        id: artStage
++        id: playerBody
          width: parent.width
 -        spacing: Style.space(12)
-+        height: width
-+        clip: true
++        height: root.compactPlayer
++          ? Math.max(artStage.height, controlPanel.implicitHeight)
++          : artStage.height + controlPanel.implicitHeight
  
 -        BorderSurface {
 -          width: Style.space(88)
@@ -420,6 +448,15 @@ index 94924a8..e0eda4f 100644
 -          radius: Style.spacing.labelGap
 -          color: Style.normalFillFor(root.popupForeground, Color.accent)
 -          borderSpec: Border.controlSpec("normal", root.popupForeground, Color.accent)
++      Item {
++        id: artStage
++        width: root.compactPlayer ? root.artworkSize : parent.width
++        height: width
++        clip: true
++        anchors.left: parent.left
++        anchors.top: root.compactPlayer ? undefined : parent.top
++        anchors.verticalCenter: root.compactPlayer ? parent.verticalCenter : undefined
++
 +        Image {
 +          id: artwork
 +          anchors.fill: parent
@@ -460,21 +497,14 @@ index 94924a8..e0eda4f 100644
 +            layer.enabled: true
            }
  
--          Text {
--            anchors.centerIn: parent
--            visible: artwork.status !== Image.Ready
--            text: "󰝚"
--            color: root.popupForeground
--            font.family: root.popupFontFamily
--            font.pixelSize: Style.font.displayLarge
 +          MultiEffect {
 +            anchors.fill: miniLogoSource
 +            source: miniLogoSource
 +            colorization: 1.0
 +            colorizationColor: root.popupForeground
-           }
-         }
- 
++          }
++        }
++
 +        MouseArea {
 +          id: artClick
 +          anchors.fill: parent
@@ -488,50 +518,44 @@ index 94924a8..e0eda4f 100644
 +          color: Util.alpha(Color.popups.background, artClick.containsMouse ? 0.5 : 0)
 +          Behavior on color { ColorAnimation { duration: 80 } }
 +
-+          Text {
-+            anchors.centerIn: parent
+           Text {
+             anchors.centerIn: parent
+-            visible: artwork.status !== Image.Ready
+-            text: "󰝚"
 +            visible: artClick.containsMouse
 +            text: root.openInNewIcon
-+            color: root.popupForeground
-+            font.family: root.popupFontFamily
-+            font.pixelSize: Style.font.display
-+          }
-+        }
-+      }
-+
-+      Column {
-+        id: controlPanel
-+        width: parent.width
-+        topPadding: Style.space(10)
-+        leftPadding: Style.space(14)
-+        rightPadding: Style.space(14)
-+        bottomPadding: Style.space(12)
-+        spacing: Style.space(10)
-+
-         Column {
+             color: root.popupForeground
+             font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.displayLarge
+-          }
+-        }
+-
+-        Column {
 -          width: parent.width - Style.space(100)
 -          anchors.verticalCenter: parent.verticalCenter
 -          spacing: Style.space(4)
-+          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
-+          spacing: Style.space(2)
- 
-           Text {
-             width: parent.width
-@@ -361,7 +544,9 @@ BarWidget {
- 
-           Text {
-             width: parent.width
+-
+-          Text {
+-            width: parent.width
+-            text: root.music && root.music.title ? root.music.title : "Apple Music"
+-            textFormat: Text.PlainText
+-            color: root.popupForeground
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.subtitle
+-            font.bold: true
+-            elide: Text.ElideRight
+-          }
+-
+-          Text {
+-            width: parent.width
 -            text: root.music ? root.music.artist : ""
-+            text: root.music && root.music.artist
-+              ? root.music.artist
-+              : (root.music && root.music.album ? root.music.album : "")
-             textFormat: Text.PlainText
-             visible: text !== ""
-             color: Qt.darker(root.popupForeground, 1.3)
-@@ -369,352 +554,308 @@ BarWidget {
-             font.pixelSize: Style.font.body
-             elide: Text.ElideRight
-           }
+-            textFormat: Text.PlainText
+-            visible: text !== ""
+-            color: Qt.darker(root.popupForeground, 1.3)
+-            font.family: root.popupFontFamily
+-            font.pixelSize: Style.font.body
+-            elide: Text.ElideRight
+-          }
 -
 -          Text {
 -            width: parent.width
@@ -542,128 +566,74 @@ index 94924a8..e0eda4f 100644
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
 -            elide: Text.ElideRight
--          }
++            font.pixelSize: Style.font.display
+           }
          }
--      }
+       }
  
--      Column {
+       Column {
 -        width: parent.width
 -        spacing: Style.space(4)
 -        visible: !!root.music && root.music.available
--
++        id: controlPanel
++        width: root.compactPlayer ? parent.width - artStage.width : parent.width
++        anchors.left: root.compactPlayer ? artStage.right : parent.left
++        anchors.right: parent.right
++        anchors.top: root.compactPlayer ? undefined : artStage.bottom
++        anchors.verticalCenter: root.compactPlayer ? parent.verticalCenter : undefined
++        topPadding: Style.space(root.compactPlayer ? 8 : 10)
++        leftPadding: Style.space(root.compactPlayer ? 10 : 14)
++        rightPadding: Style.space(root.compactPlayer ? 10 : 14)
++        bottomPadding: Style.space(root.compactPlayer ? 8 : 12)
++        spacing: Style.space(root.compactPlayer ? 6 : 10)
+ 
 -        Rectangle {
 -          id: progressTrack
 -          width: parent.width
 -          height: Style.space(5)
 -          radius: height / 2
 -          color: Util.alpha(root.popupForeground, 0.2)
-+        Column {
++        Item {
 +          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
-+          spacing: Style.space(4)
++          implicitHeight: Math.max(titleBlock.implicitHeight, cogBtn.implicitHeight)
  
-           Rectangle {
+-          Rectangle {
 -            width: parent.width * (root.music ? root.music.progress : 0)
 -            height: parent.height
 -            radius: parent.radius
 -            color: Color.accent
-+            id: progressTrack
-+            width: parent.width
-+            height: Style.space(6)
-+            radius: height / 2
-+            color: Util.alpha(root.popupForeground, 0.2)
-+
-+            Rectangle {
-+              width: parent.width * (root.music ? root.music.progress : 0)
-+              height: parent.height
-+              radius: parent.radius
-+              color: root.popupForeground
-+            }
-+
-+            MouseArea {
-+              anchors.fill: parent
-+              enabled: !!root.music && root.music.canSeek
-+              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-+              onClicked: function(mouse) { root.music.seekFraction(mouse.x / width) }
-+            }
-           }
- 
+-          }
+-
 -          MouseArea {
 -            anchors.fill: parent
 -            enabled: !!root.music && root.music.canSeek
 -            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
 -            onClicked: function(mouse) { root.music.seekFraction(mouse.x / width) }
-+          Row {
-+            width: parent.width
-+
-+            Text {
-+              id: elapsed
-+              text: root.music ? root.music.elapsedText : "0:00"
-+              color: Qt.darker(root.popupForeground, 1.4)
-+              font.family: root.popupFontFamily
-+              font.pixelSize: Style.font.caption
-+            }
-+
-+            Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
-+
-+            Text {
-+              id: duration
-+              text: root.music ? root.music.lengthText : "--:--"
-+              color: Qt.darker(root.popupForeground, 1.4)
-+              font.family: root.popupFontFamily
-+              font.pixelSize: Style.font.caption
-+            }
-           }
-         }
- 
-         Row {
+-          }
+-        }
+-
+-        Row {
 -          width: parent.width
-+          anchors.horizontalCenter: parent.horizontalCenter
-+          spacing: Style.space(8)
- 
+-
 -          Text {
 -            id: elapsed
 -            text: root.music ? root.music.elapsedText : "0:00"
 -            color: Qt.darker(root.popupForeground, 1.4)
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
-+          MiniButton {
-+            iconText: "󰒮"
-+            iconSize: Style.font.iconLarge
-+            horizontalPadding: Style.space(12)
-+            verticalPadding: Style.space(8)
-+            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
-+            tooltipText: "Previous"
-+            onClicked: root.music.previous()
-           }
- 
+-          }
+-
 -          Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
-+          MiniButton {
-+            iconText: root.playbackIcon
-+            iconSize: Style.font.heading
-+            horizontalPadding: Style.space(16)
-+            verticalPadding: Style.space(10)
-+            enabled: !!root.music && root.music.available
-+            tooltipText: root.music && root.music.playing ? "Pause" : "Play"
-+            onClicked: root.music.togglePlayback()
-+          }
- 
+-
 -          Text {
 -            id: duration
 -            text: root.music ? root.music.lengthText : "--:--"
 -            color: Qt.darker(root.popupForeground, 1.4)
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
-+          MiniButton {
-+            iconText: "󰒭"
-+            iconSize: Style.font.iconLarge
-+            horizontalPadding: Style.space(12)
-+            verticalPadding: Style.space(8)
-+            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
-+            tooltipText: "Next"
-+            onClicked: root.music.next()
-           }
-         }
- 
+-          }
+-        }
+-
 -        Text {
 -          width: parent.width
 -          visible: !!root.music && !root.music.hasValidLength
@@ -672,167 +642,13 @@ index 94924a8..e0eda4f 100644
 -          color: Qt.darker(root.popupForeground, 1.6)
 -          font.family: root.popupFontFamily
 -          font.pixelSize: Style.font.caption
-+        Row {
-+          anchors.horizontalCenter: parent.horizontalCenter
-+          spacing: Style.space(6)
-+
-+          MiniButton {
-+            iconText: root.music && root.music.rating === "like"
-+              ? root.heartIcon : root.heartOutlineIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && root.music.rating === "like"
-+            enabled: !!root.music && root.music.bridgeActive
-+            tooltipText: "Like"
-+            onClicked: root.music.toggleLike()
-+          }
-+
-+          MiniButton {
-+            iconText: root.music && root.music.rating === "dislike"
-+              ? root.thumbDownIcon : root.thumbDownOutlineIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && root.music.rating === "dislike"
-+            enabled: !!root.music && root.music.bridgeActive
-+            tooltipText: "Suggest less"
-+            onClicked: root.music.toggleDislike()
-+          }
-+
-+          MiniButton {
-+            iconText: !root.music || root.music.libraryState === "unknown" ? root.plusIcon
-+              : root.music.libraryState === "absent" ? root.plusIcon
-+              : root.music.libraryState === "adding" ? root.clockOutlineIcon
-+              : root.music.libraryState === "present" ? root.checkIcon : root.alertIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && root.music.libraryState === "present"
-+            enabled: !!root.music && root.music.libraryState === "absent"
-+            tooltipText: !root.music || root.music.libraryState === "unknown"
-+              ? "Library state unavailable"
-+              : root.music.libraryState === "absent" ? "Add to library"
-+              : root.music.libraryState === "adding" ? "Adding to library"
-+              : root.music.libraryState === "present" ? "In your library"
-+              : "Couldn't add to library"
-+            onClicked: root.music.addToLibrary()
-+          }
-+
-+          Rectangle {
-+            width: 1
-+            height: Style.space(18)
-+            anchors.verticalCenter: parent.verticalCenter
-+            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
-+            color: Util.alpha(root.popupForeground, 0.18)
-+          }
-+
-+          MiniButton {
-+            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
-+            iconText: root.shuffleIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && root.music.shuffleMode === true
-+            enabled: !!root.music && root.music.shuffleMode !== null
-+            tooltipText: "Shuffle"
-+            onClicked: root.music.setShuffle(root.music.shuffleMode !== true)
-+          }
-+
-+          MiniButton {
-+            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
-+            iconText: !root.music || root.music.repeatMode === "all" ? root.repeatIcon
-+              : root.music.repeatMode === "one" ? root.repeatOnceIcon : root.repeatOffIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
-+            enabled: !!root.music && root.music.repeatMode !== "unknown"
-+            tooltipText: root.music && root.music.repeatMode === "one"
-+              ? "Repeat one" : root.music && root.music.repeatMode === "all" ? "Repeat all" : "Repeat off"
-+            onClicked: root.music.cycleRepeat()
-+          }
-+
-+          MiniButton {
-+            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
-+            iconText: root.autoplayIcon
-+            iconSize: Style.font.icon
-+            active: !!root.music && root.music.autoplay === true
-+            enabled: !!root.music && root.music.autoplay !== null
-+            tooltipText: "Autoplay"
-+            onClicked: root.music.setAutoplay(root.music.autoplay !== true)
-+          }
-+        }
-+
-+        Row {
-+          anchors.horizontalCenter: parent.horizontalCenter
-+          spacing: Style.space(12)
-+
-+          Text {
-+            text: "Art " + root.artworkSize
-+            color: Qt.darker(root.popupForeground, 1.6)
-+            font.family: root.popupFontFamily
-+            font.pixelSize: Style.font.caption
-+            anchors.verticalCenter: parent.verticalCenter
-+          }
-+
-+          Text {
-+            text: "−"
-+            color: root.popupForeground
-+            font.family: root.popupFontFamily
-+            font.pixelSize: Style.font.body
-+            anchors.verticalCenter: parent.verticalCenter
-+            Accessible.role: Accessible.Button
-+            Accessible.name: "Smaller artwork"
-+
-+            MouseArea {
-+              anchors.fill: parent
-+              anchors.margins: -Style.space(4)
-+              hoverEnabled: true
-+              cursorShape: Qt.PointingHandCursor
-+              onClicked: root.setArtworkSize(root.artworkSize - 10)
-+            }
-+          }
-+
-+          Text {
-+            text: "+"
-+            color: root.popupForeground
-+            font.family: root.popupFontFamily
-+            font.pixelSize: Style.font.body
-+            anchors.verticalCenter: parent.verticalCenter
-+            Accessible.role: Accessible.Button
-+            Accessible.name: "Larger artwork"
-+
-+            MouseArea {
-+              anchors.fill: parent
-+              anchors.margins: -Style.space(4)
-+              hoverEnabled: true
-+              cursorShape: Qt.PointingHandCursor
-+              onClicked: root.setArtworkSize(root.artworkSize + 10)
-+            }
-+          }
-         }
-       }
- 
+-        }
+-      }
+-
 -      Row {
 -        anchors.horizontalCenter: parent.horizontalCenter
-+      Flickable {
-+        id: extrasFlick
-+        width: parent.width
-+        clip: true
-+        boundsBehavior: Flickable.StopAtBounds
-+        visible: extrasColumn.visible
-+        height: {
-+          if (!extrasColumn.visible) return 0
-+          var extras = extrasColumn.implicitHeight
-+          var used = artStage.height + controlPanel.implicitHeight
-+          var budget = Math.max(0, root.miniMaxHeight - used)
-+          return Math.min(extras, budget)
-+        }
-+        contentWidth: width
-+        contentHeight: extrasColumn.implicitHeight
-+
-+      Column {
-+        id: extrasColumn
-+        width: extrasFlick.width
-+        visible: (root.showQueue && !!root.music && root.music.upNext.length > 0)
-+          || (root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0)
-+        topPadding: 0
-+        leftPadding: Style.space(10)
-+        rightPadding: Style.space(10)
-+        bottomPadding: Style.space(12)
-         spacing: Style.space(8)
- 
+-        spacing: Style.space(8)
+-
 -        Button {
 -          width: Style.space(44)
 -          height: Style.space(40)
@@ -842,11 +658,7 @@ index 94924a8..e0eda4f 100644
 -          opacity: enabled ? 1 : 0.4
 -          onClicked: root.music.previous()
 -        }
-+        Column {
-+          width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
-+          spacing: Style.space(4)
-+          visible: root.showQueue && !!root.music && root.music.upNext.length > 0
- 
+-
 -        Button {
 -          width: Style.space(44)
 -          height: Style.space(40)
@@ -857,8 +669,7 @@ index 94924a8..e0eda4f 100644
 -          opacity: enabled ? 1 : 0.4
 -          onClicked: root.music.togglePlayback()
 -        }
-+          PanelSeparator { foreground: root.popupForeground }
- 
+-
 -        Button {
 -          width: Style.space(44)
 -          height: Style.space(40)
@@ -869,21 +680,14 @@ index 94924a8..e0eda4f 100644
 -          onClicked: root.music.next()
 -        }
 -      }
-+          PanelSectionHeader {
-+            text: "Up next"
-+            foreground: root.popupForeground
-+            fontFamily: root.popupFontFamily
-+          }
- 
+-
 -      // Compact secondary controls: ratings/library and playback modes share
 -      // one row, separated visually, so the popup keeps transport prominent
 -      // without spending three full rows on nine actions.
 -      Row {
 -        anchors.horizontalCenter: parent.horizontalCenter
 -        spacing: Style.space(6)
-+          Repeater {
-+            model: root.showQueue && root.music ? root.music.upNext.slice(0, 6) : []
- 
+-
 -        Button {
 -          width: Style.space(36)
 -          height: Style.space(34)
@@ -1015,21 +819,32 @@ index 94924a8..e0eda4f 100644
 -            required property var modelData
 -            width: parent.width
 -            height: queueLabel.implicitHeight + Style.space(4)
--
--            Text {
++          Column {
++            id: titleBlock
++            anchors.left: parent.left
++            anchors.right: cogBtn.left
++            anchors.rightMargin: Style.space(6)
++            anchors.verticalCenter: parent.verticalCenter
++            spacing: Style.space(2)
+ 
+             Text {
 -              id: queueLabel
 -              anchors.verticalCenter: parent.verticalCenter
 -              width: parent.width - queueDuration.implicitWidth - Style.space(10)
 -              text: queueRow.modelData.title +
 -                (queueRow.modelData.artist ? " — " + queueRow.modelData.artist : "")
--              textFormat: Text.PlainText
--              color: root.popupForeground
--              font.family: root.popupFontFamily
++              width: parent.width
++              text: root.music && root.music.title ? root.music.title : "Apple Music"
+               textFormat: Text.PlainText
+               color: root.popupForeground
+               font.family: root.popupFontFamily
 -              font.pixelSize: Style.font.caption
--              elide: Text.ElideRight
--            }
--
--            Text {
++              font.pixelSize: root.compactPlayer ? Style.font.body : Style.font.subtitle
++              font.bold: true
+               elide: Text.ElideRight
+             }
+ 
+             Text {
 -              id: queueDuration
 -              anchors.right: parent.right
 -              anchors.verticalCenter: parent.verticalCenter
@@ -1044,30 +859,18 @@ index 94924a8..e0eda4f 100644
 -              anchors.fill: parent
 -              cursorShape: Qt.PointingHandCursor
 -              onClicked: root.music.jumpToQueueIndex(queueRow.modelData.index)
-+            TrackRow {
-+              required property var modelData
-+              titleText: modelData.title || ""
-+              detailText: modelData.artist || ""
-+              trailingText: root.music && modelData.durationSeconds > 0
-+                ? Model.formatTime(modelData.durationSeconds) : ""
-+              onActivated: root.music.jumpToQueueIndex(modelData.index)
-             }
-           }
-         }
+-            }
+-          }
+-        }
 -      }
- 
+-
 -      Column {
 -        width: parent.width
 -        spacing: Style.space(4)
 -        visible: root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0
-+        Column {
-+          width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
-+          spacing: Style.space(4)
-+          visible: root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0
- 
+-
 -        PanelSeparator { foreground: root.popupForeground }
-+          PanelSeparator { foreground: root.popupForeground }
- 
+-
 -        Text {
 -          width: parent.width
 -          text: "Recently played"
@@ -1076,19 +879,11 @@ index 94924a8..e0eda4f 100644
 -          font.pixelSize: Style.font.caption
 -          font.bold: true
 -        }
-+          PanelSectionHeader {
-+            text: "Recently played"
-+            foreground: root.popupForeground
-+            fontFamily: root.popupFontFamily
-+          }
- 
+-
 -        Repeater {
 -          model: root.showRecentlyPlayed && root.music
 -            ? root.music.recentTracks.slice(0, 5) : []
-+          Repeater {
-+            model: root.showRecentlyPlayed && root.music
-+              ? root.music.recentTracks.slice(0, 5) : []
- 
+-
 -          Item {
 -            id: historyRow
 -            required property var modelData
@@ -1103,17 +898,54 @@ index 94924a8..e0eda4f 100644
 -            Text {
 -              id: historyLabel
 -              anchors.verticalCenter: parent.verticalCenter
--              width: parent.width
+               width: parent.width
 -              text: historyRow.modelData.title +
 -                (historyRow.modelData.artist ? " — " + historyRow.modelData.artist : "")
--              textFormat: Text.PlainText
--              color: Qt.darker(root.popupForeground, 1.3)
--              font.family: root.popupFontFamily
--              font.pixelSize: Style.font.caption
--              elide: Text.ElideRight
--            }
--            MouseArea {
--              anchors.fill: parent
++              text: root.music && root.music.artist
++                ? root.music.artist
++                : (root.music && root.music.album ? root.music.album : "")
+               textFormat: Text.PlainText
++              visible: text !== ""
+               color: Qt.darker(root.popupForeground, 1.3)
+               font.family: root.popupFontFamily
+               font.pixelSize: Style.font.caption
+               elide: Text.ElideRight
+             }
++          }
++
++          MiniButton {
++            id: cogBtn
++            anchors.right: parent.right
++            anchors.top: parent.top
++            iconText: root.cogIcon
++            iconSize: Style.font.icon
++            iconColor: Qt.darker(root.popupForeground, 1.8)
++            active: root.settingsOpen
++            tooltipText: "Miniplayer settings"
++            onClicked: root.settingsOpen = !root.settingsOpen
++          }
++        }
++
++        Column {
++          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
++          spacing: Style.space(4)
++
++          Rectangle {
++            id: progressTrack
++            width: parent.width
++            height: Style.space(6)
++            radius: height / 2
++            color: Util.alpha(root.popupForeground, 0.2)
++
++            Rectangle {
++              width: parent.width * (root.music ? root.music.progress : 0)
++              height: parent.height
++              radius: parent.radius
++              color: root.popupForeground
++            }
++
+             MouseArea {
+               anchors.fill: parent
 -              // Replayable rows carry an exact-song descriptor; legacy rows
 -              // keep the pre-existing focus behavior and must not imply replay.
 -              cursorShape: historyRow.modelData.play
@@ -1121,6 +953,281 @@ index 94924a8..e0eda4f 100644
 -              onClicked: if (root.music) {
 -                if (historyRow.modelData.play) root.music.replayTrack(historyRow.modelData)
 -                else root.music.openAppleMusic()
++              enabled: !!root.music && root.music.canSeek
++              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
++              onClicked: function(mouse) { root.music.seekFraction(mouse.x / width) }
++            }
++          }
++
++          Row {
++            width: parent.width
++
++            Text {
++              id: elapsed
++              text: root.music ? root.music.elapsedText : "0:00"
++              color: Qt.darker(root.popupForeground, 1.4)
++              font.family: root.popupFontFamily
++              font.pixelSize: Style.font.caption
++            }
++
++            Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
++
++            Text {
++              id: duration
++              text: root.music ? root.music.lengthText : "--:--"
++              color: Qt.darker(root.popupForeground, 1.4)
++              font.family: root.popupFontFamily
++              font.pixelSize: Style.font.caption
++            }
++          }
++        }
++
++        Row {
++          anchors.horizontalCenter: parent.horizontalCenter
++          spacing: Style.space(8)
++
++          MiniButton {
++            iconText: "󰒮"
++            iconSize: Style.font.iconLarge
++            horizontalPadding: Style.space(12)
++            verticalPadding: Style.space(8)
++            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
++            tooltipText: "Previous"
++            onClicked: root.music.previous()
++          }
++
++          MiniButton {
++            iconText: root.playbackIcon
++            iconSize: Style.font.heading
++            horizontalPadding: Style.space(16)
++            verticalPadding: Style.space(10)
++            enabled: !!root.music && root.music.available
++            tooltipText: root.music && root.music.playing ? "Pause" : "Play"
++            onClicked: root.music.togglePlayback()
++          }
++
++          MiniButton {
++            iconText: "󰒭"
++            iconSize: Style.font.iconLarge
++            horizontalPadding: Style.space(12)
++            verticalPadding: Style.space(8)
++            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
++            tooltipText: "Next"
++            onClicked: root.music.next()
++          }
++        }
++
++        Row {
++          anchors.horizontalCenter: parent.horizontalCenter
++          spacing: Style.space(6)
++          visible: !root.compactPlayer
++
++          MiniButton {
++            iconText: root.music && root.music.rating === "like"
++              ? root.heartIcon : root.heartOutlineIcon
++            iconSize: Style.font.icon
++            active: !!root.music && root.music.rating === "like"
++            enabled: !!root.music && root.music.bridgeActive
++            tooltipText: "Like"
++            onClicked: root.music.toggleLike()
++          }
++
++          MiniButton {
++            iconText: root.music && root.music.rating === "dislike"
++              ? root.thumbDownIcon : root.thumbDownOutlineIcon
++            iconSize: Style.font.icon
++            active: !!root.music && root.music.rating === "dislike"
++            enabled: !!root.music && root.music.bridgeActive
++            tooltipText: "Suggest less"
++            onClicked: root.music.toggleDislike()
++          }
++
++          MiniButton {
++            iconText: !root.music || root.music.libraryState === "unknown" ? root.plusIcon
++              : root.music.libraryState === "absent" ? root.plusIcon
++              : root.music.libraryState === "adding" ? root.clockOutlineIcon
++              : root.music.libraryState === "present" ? root.checkIcon : root.alertIcon
++            iconSize: Style.font.icon
++            active: !!root.music && root.music.libraryState === "present"
++            enabled: !!root.music && root.music.libraryState === "absent"
++            tooltipText: !root.music || root.music.libraryState === "unknown"
++              ? "Library state unavailable"
++              : root.music.libraryState === "absent" ? "Add to library"
++              : root.music.libraryState === "adding" ? "Adding to library"
++              : root.music.libraryState === "present" ? "In your library"
++              : "Couldn't add to library"
++            onClicked: root.music.addToLibrary()
++          }
++
++          Rectangle {
++            width: 1
++            height: Style.space(18)
++            anchors.verticalCenter: parent.verticalCenter
++            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++            color: Util.alpha(root.popupForeground, 0.18)
++          }
++
++          MiniButton {
++            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++            iconText: root.shuffleIcon
++            iconSize: Style.font.icon
++            active: !!root.music && root.music.shuffleMode === true
++            enabled: !!root.music && root.music.shuffleMode !== null
++            tooltipText: "Shuffle"
++            onClicked: root.music.setShuffle(root.music.shuffleMode !== true)
++          }
++
++          MiniButton {
++            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++            iconText: !root.music || root.music.repeatMode === "all" ? root.repeatIcon
++              : root.music.repeatMode === "one" ? root.repeatOnceIcon : root.repeatOffIcon
++            iconSize: Style.font.icon
++            active: !!root.music && (root.music.repeatMode === "all" || root.music.repeatMode === "one")
++            enabled: !!root.music && root.music.repeatMode !== "unknown"
++            tooltipText: root.music && root.music.repeatMode === "one"
++              ? "Repeat one" : root.music && root.music.repeatMode === "all" ? "Repeat all" : "Repeat off"
++            onClicked: root.music.cycleRepeat()
++          }
++
++          MiniButton {
++            visible: root.showPlaybackModes && !!root.music && root.music.bridgeActive
++            iconText: root.autoplayIcon
++            iconSize: Style.font.icon
++            active: !!root.music && root.music.autoplay === true
++            enabled: !!root.music && root.music.autoplay !== null
++            tooltipText: "Autoplay"
++            onClicked: root.music.setAutoplay(root.music.autoplay !== true)
++          }
++        }
++
++      }
++      }
++
++      Column {
++        id: settingsPanel
++        width: parent.width
++        visible: root.settingsOpen
++        topPadding: Style.space(4)
++        leftPadding: Style.space(14)
++        rightPadding: Style.space(14)
++        bottomPadding: Style.space(12)
++        spacing: Style.space(8)
++
++        PanelSeparator { foreground: root.popupForeground }
++
++        Text {
++          text: "Artwork"
++          color: Qt.darker(root.popupForeground, 1.4)
++          font.family: root.popupFontFamily
++          font.pixelSize: Style.font.caption
++          font.bold: true
++        }
++
++        Flow {
++          width: settingsPanel.width - settingsPanel.leftPadding - settingsPanel.rightPadding
++          spacing: Style.space(8)
++
++          Repeater {
++            model: root.artworkPresets
++
++            Text {
++              required property var modelData
++              readonly property int sizeValue: Number(modelData)
++              readonly property bool selected: root.artworkSize === sizeValue
++              text: String(sizeValue)
++              color: selected ? root.popupForeground : Qt.darker(root.popupForeground, 1.55)
++              font.family: root.popupFontFamily
++              font.pixelSize: Style.font.caption
++              font.bold: selected
++              MouseArea {
++                anchors.fill: parent
++                anchors.margins: -Style.space(4)
++                hoverEnabled: true
++                cursorShape: Qt.PointingHandCursor
++                onClicked: root.setArtworkSize(sizeValue)
+               }
+             }
+           }
+         }
+       }
+ 
+-      Button {
+-        anchors.horizontalCenter: parent.horizontalCenter
+-        text: "Open Apple Music"
+-        iconText: ""
+-        foreground: root.popupForeground
+-        onClicked: if (root.music) root.music.openAppleMusic()
++      Flickable {
++        id: extrasFlick
++        width: parent.width
++        clip: true
++        boundsBehavior: Flickable.StopAtBounds
++        visible: extrasColumn.visible
++        height: {
++          if (!extrasColumn.visible) return 0
++          var extras = extrasColumn.implicitHeight
++          var used = playerBody.height + (root.settingsOpen ? settingsPanel.implicitHeight : 0)
++          var budget = Math.max(0, root.miniMaxHeight - used)
++          return Math.min(extras, budget)
++        }
++        contentWidth: width
++        contentHeight: extrasColumn.implicitHeight
++
++      Column {
++        id: extrasColumn
++        width: extrasFlick.width
++        visible: (root.showQueue && !!root.music && root.music.upNext.length > 0)
++          || (root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0)
++        topPadding: 0
++        leftPadding: Style.space(10)
++        rightPadding: Style.space(10)
++        bottomPadding: Style.space(12)
++        spacing: Style.space(8)
++
++        Column {
++          width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
++          spacing: Style.space(4)
++          visible: root.showQueue && !!root.music && root.music.upNext.length > 0
++
++          PanelSeparator { foreground: root.popupForeground }
++
++          PanelSectionHeader {
++            text: "Up next"
++            foreground: root.popupForeground
++            fontFamily: root.popupFontFamily
++          }
++
++          Repeater {
++            model: root.showQueue && root.music ? root.music.upNext.slice(0, 6) : []
++
++            TrackRow {
++              required property var modelData
++              titleText: modelData.title || ""
++              detailText: modelData.artist || ""
++              trailingText: root.music && modelData.durationSeconds > 0
++                ? Model.formatTime(modelData.durationSeconds) : ""
++              onActivated: root.music.jumpToQueueIndex(modelData.index)
++            }
++          }
++        }
++
++        Column {
++          width: extrasColumn.width - extrasColumn.leftPadding - extrasColumn.rightPadding
++          spacing: Style.space(4)
++          visible: root.showRecentlyPlayed && !!root.music && root.music.recentTracks.length > 0
++
++          PanelSeparator { foreground: root.popupForeground }
++
++          PanelSectionHeader {
++            text: "Recently played"
++            foreground: root.popupForeground
++            fontFamily: root.popupFontFamily
++          }
++
++          Repeater {
++            model: root.showRecentlyPlayed && root.music
++              ? root.music.recentTracks.slice(0, 5) : []
++
 +            TrackRow {
 +              required property var modelData
 +              titleText: modelData.title || ""
@@ -1129,18 +1236,11 @@ index 94924a8..e0eda4f 100644
 +              onActivated: if (root.music) {
 +                if (modelData.play) root.music.replayTrack(modelData)
 +                else root.openFullPlayer()
-               }
-             }
-           }
-         }
-       }
--
--      Button {
--        anchors.horizontalCenter: parent.horizontalCenter
--        text: "Open Apple Music"
--        iconText: ""
--        foreground: root.popupForeground
--        onClicked: if (root.music) root.music.openAppleMusic()
++              }
++            }
++          }
++        }
++      }
        }
      }
    }
@@ -1394,7 +1494,7 @@ index 0000000..5c7005f
 +  chrome.tabs.setZoom(0.75)
 +})()
 diff --git a/manifest.json b/manifest.json
-index 67957ed..7dd823e 100644
+index 67957ed..793742f 100644
 --- a/manifest.json
 +++ b/manifest.json
 @@ -2,7 +2,7 @@
@@ -1416,20 +1516,18 @@ index 67957ed..7dd823e 100644
      },
      "schema": [
        {
-@@ -71,6 +72,16 @@
+@@ -71,6 +72,14 @@
          "type": "boolean",
          "label": "Show recently played",
          "defaultValue": true
 +      },
 +      {
 +        "key": "artworkSize",
-+        "type": "integer",
++        "type": "enum",
 +        "label": "Miniplayer artwork size",
-+        "min": 180,
-+        "max": 420,
-+        "step": 10,
-+        "defaultValue": 260,
-+        "description": "Square cover size in the popup, in pixels. 260 matches the album-page artwork in the Apple Music web player."
++        "options": ["64", "96", "128", "160", "200", "260", "320"],
++        "defaultValue": "260",
++        "description": "Square cover size in the popup. 160 and below use a compact left-to-right layout."
        }
      ]
    }
