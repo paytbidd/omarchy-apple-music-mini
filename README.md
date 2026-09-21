@@ -91,7 +91,7 @@ o.bind(
 
 - Click the miniplayer artwork to open the full player on the current workspace (unstashes if needed). Super+W sends it to the scratchpad and keeps playback going. Super+S brings the scratchpad back. Super+W still closes every other window.
 - The dedicated Chromium window defaults to 75% page zoom. Click **Playlists** in the sidebar to collapse or expand that list, same idea as the Mac app; the choice sticks across restarts.
-- Miniplayer cover defaults to **260px**. The gray cog opens size presets (64–320). **160 and below** switch to a compact left-to-right layout.
+- Miniplayer cover defaults to **260px**. A small cog at the bottom of the player opens size presets (64–320). **200 and below** use a compact left-to-right layout.
 - Omarchy font on the web player is handled by **Omarchy Type** (`payton.type`), not this overlay.
 - To actually stop Chromium: `~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini quit`
 - Unapply restores stock Super+W (close) for Apple Music too.
