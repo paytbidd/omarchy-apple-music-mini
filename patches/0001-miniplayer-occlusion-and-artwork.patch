@@ -156,10 +156,10 @@ index f1e45e6..3b01327 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..044cdcb 100644
+index 94924a8..71af2f8 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
-@@ -18,6 +18,17 @@ BarWidget {
+@@ -18,6 +18,18 @@ BarWidget {
    readonly property bool showQueue: setting("showQueue", true)
    readonly property bool showRecentlyPlayed: setting("showRecentlyPlayed", true)
    readonly property bool showPlaybackModes: setting("showPlaybackModes", true)
@@ -172,12 +172,13 @@ index 94924a8..044cdcb 100644
 +    return root.snapArtworkSize(value)
 +  }
 +  readonly property bool compactPlayer: artworkSize <= 200
++  readonly property bool tinyPlayer: artworkSize <= 96
 +  property bool settingsOpen: false
 +  readonly property string cogIcon: String.fromCodePoint(0xf0493)
    // Nerd Font nf-md glyphs, resolved from CaskaydiaMono Nerd Font's cmap:
    // md-heart, md-heart_outline, md-thumb_down, md-thumb_down_outline
    readonly property string heartIcon: String.fromCodePoint(0xf02d1)
-@@ -35,6 +46,8 @@ BarWidget {
+@@ -35,6 +47,8 @@ BarWidget {
    readonly property string clockOutlineIcon: String.fromCodePoint(0xf0465)
    readonly property string alertIcon: String.fromCodePoint(0xf0292)
    readonly property string autoplayIcon: String.fromCodePoint(0xf0ab5)
@@ -186,7 +187,7 @@ index 94924a8..044cdcb 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -54,8 +67,43 @@ BarWidget {
+@@ -54,8 +68,43 @@ BarWidget {
    readonly property bool tooltipHovered: visible && opacity > 0 && barMouseArea.containsMouse
  
    function open() { popupOpen = true }
@@ -232,7 +233,7 @@ index 94924a8..044cdcb 100644
  
    // Last artwork URL that decoded successfully. Chromium hands MPRIS a new
    // /tmp artwork file several times per track switch and deletes the old
-@@ -263,90 +311,264 @@ BarWidget {
+@@ -263,90 +312,266 @@ BarWidget {
      }
    }
  
@@ -253,6 +254,7 @@ index 94924a8..044cdcb 100644
 +
 +    implicitWidth: glyph.implicitWidth + horizontalPadding * 2
 +    implicitHeight: Math.max(Style.space(root.compactPlayer ? 26 : 34), glyph.implicitHeight + verticalPadding * 2)
++    clip: true
 +    radius: Style.cornerRadius
 +    opacity: enabled ? 1 : 0.4
 +    color: !enabled ? "transparent"
@@ -422,7 +424,7 @@ index 94924a8..044cdcb 100644
 -    }
 +    padding: 0
 +    contentWidth: popup.fittedContentWidth(root.compactPlayer
-+      ? Math.max(root.artworkSize + 248, 340)
++      ? root.artworkSize + 220
 +      : Math.max(root.artworkSize, 300))
 +    contentHeight: popup.fittedContentHeight(content.implicitHeight, root.miniMaxHeight)
  
@@ -439,7 +441,7 @@ index 94924a8..044cdcb 100644
          width: parent.width
 -        spacing: Style.space(12)
 +        height: root.compactPlayer
-+          ? Math.max(artStage.height, controlPanel.implicitHeight)
++          ? artStage.height
 +          : artStage.height + controlPanel.implicitHeight
  
 -        BorderSurface {
@@ -541,13 +543,13 @@ index 94924a8..044cdcb 100644
 +        width: root.compactPlayer ? parent.width - artStage.width : parent.width
 +        anchors.left: root.compactPlayer ? artStage.right : parent.left
 +        anchors.right: parent.right
-+        anchors.top: root.compactPlayer ? undefined : artStage.bottom
-+        anchors.verticalCenter: root.compactPlayer ? parent.verticalCenter : undefined
-+        topPadding: Style.space(root.compactPlayer ? 8 : 10)
-+        leftPadding: Style.space(root.compactPlayer ? 10 : 14)
-+        rightPadding: Style.space(root.compactPlayer ? 10 : 14)
-+        bottomPadding: Style.space(root.compactPlayer ? 8 : 12)
-+        spacing: Style.space(root.compactPlayer ? 6 : 10)
++        anchors.top: root.compactPlayer ? parent.top : artStage.bottom
++        anchors.bottom: root.compactPlayer ? parent.bottom : undefined
++        topPadding: Style.space(root.compactPlayer ? 6 : 10)
++        leftPadding: Style.space(root.compactPlayer ? 8 : 14)
++        rightPadding: Style.space(root.compactPlayer ? 8 : 14)
++        bottomPadding: Style.space(root.compactPlayer ? 6 : 12)
++        spacing: Style.space(root.compactPlayer ? 4 : 10)
 +        clip: true
 +
          Column {
@@ -557,10 +559,11 @@ index 94924a8..044cdcb 100644
 +          id: titleBlock
 +          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
 +          spacing: Style.space(2)
++          visible: !root.tinyPlayer
  
            Text {
              width: parent.width
-@@ -354,367 +576,345 @@ BarWidget {
+@@ -354,367 +579,355 @@ BarWidget {
              textFormat: Text.PlainText
              color: root.popupForeground
              font.family: root.popupFontFamily
@@ -611,6 +614,7 @@ index 94924a8..044cdcb 100644
 +        Column {
 +          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
 +          spacing: Style.space(4)
++          visible: !root.tinyPlayer
  
            Rectangle {
 -            width: parent.width * (root.music ? root.music.progress : 0)
@@ -669,7 +673,8 @@ index 94924a8..044cdcb 100644
  
          Row {
 -          width: parent.width
-+          anchors.horizontalCenter: parent.horizontalCenter
++          id: transportRow
++          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
 +          spacing: Style.space(root.compactPlayer ? 4 : 8)
  
 -          Text {
@@ -679,10 +684,11 @@ index 94924a8..044cdcb 100644
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
 +          MiniButton {
++            width: (transportRow.width - transportRow.spacing * 2) / 3
 +            iconText: "󰒮"
 +            iconSize: root.compactPlayer ? Style.font.icon : Style.font.iconLarge
-+            horizontalPadding: Style.space(root.compactPlayer ? 6 : 12)
-+            verticalPadding: Style.space(root.compactPlayer ? 4 : 8)
++            horizontalPadding: Style.space(root.compactPlayer ? 4 : 8)
++            verticalPadding: Style.space(root.compactPlayer ? 2 : 8)
 +            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoPrevious
 +            tooltipText: "Previous"
 +            onClicked: root.music.previous()
@@ -690,10 +696,11 @@ index 94924a8..044cdcb 100644
  
 -          Item { width: parent.width - elapsed.implicitWidth - duration.implicitWidth; height: 1 }
 +          MiniButton {
++            width: (transportRow.width - transportRow.spacing * 2) / 3
 +            iconText: root.playbackIcon
 +            iconSize: root.compactPlayer ? Style.font.iconLarge : Style.font.heading
-+            horizontalPadding: Style.space(root.compactPlayer ? 8 : 16)
-+            verticalPadding: Style.space(root.compactPlayer ? 4 : 10)
++            horizontalPadding: Style.space(root.compactPlayer ? 4 : 10)
++            verticalPadding: Style.space(root.compactPlayer ? 2 : 8)
 +            enabled: !!root.music && root.music.available
 +            tooltipText: root.music && root.music.playing ? "Pause" : "Play"
 +            onClicked: root.music.togglePlayback()
@@ -706,41 +713,20 @@ index 94924a8..044cdcb 100644
 -            font.family: root.popupFontFamily
 -            font.pixelSize: Style.font.caption
 +          MiniButton {
++            width: (transportRow.width - transportRow.spacing * 2) / 3
 +            iconText: "󰒭"
 +            iconSize: root.compactPlayer ? Style.font.icon : Style.font.iconLarge
-+            horizontalPadding: Style.space(root.compactPlayer ? 6 : 12)
-+            verticalPadding: Style.space(root.compactPlayer ? 4 : 8)
++            horizontalPadding: Style.space(root.compactPlayer ? 4 : 8)
++            verticalPadding: Style.space(root.compactPlayer ? 2 : 8)
 +            enabled: !!root.music && root.music.available && root.music.activePlayer.canGoNext
 +            tooltipText: "Next"
 +            onClicked: root.music.next()
            }
          }
  
-         Text {
--          width: parent.width
--          visible: !!root.music && !root.music.hasValidLength
--          text: "Apple Music does not expose track duration"
--          horizontalAlignment: Text.AlignHCenter
--          color: Qt.darker(root.popupForeground, 1.6)
-+          text: root.cogIcon
-+          color: Qt.darker(root.popupForeground, 2.1)
-           font.family: root.popupFontFamily
-           font.pixelSize: Style.font.caption
-+          opacity: 0.55
-+          Accessible.role: Accessible.Button
-+          Accessible.name: "Miniplayer settings"
-+          MouseArea {
-+            anchors.fill: parent
-+            anchors.margins: -Style.space(6)
-+            hoverEnabled: true
-+            cursorShape: Qt.PointingHandCursor
-+            onClicked: root.settingsOpen = !root.settingsOpen
-+          }
-         }
-+
-+        Row {
-+          anchors.horizontalCenter: parent.horizontalCenter
-+          spacing: Style.space(6)
++        Flow {
++          width: controlPanel.width - controlPanel.leftPadding - controlPanel.rightPadding
++          spacing: Style.space(4)
 +          visible: !root.compactPlayer
 +
 +          MiniButton {
@@ -822,6 +808,33 @@ index 94924a8..044cdcb 100644
 +        }
 +
 +      }
++
+         Text {
+-          width: parent.width
+-          visible: !!root.music && !root.music.hasValidLength
+-          text: "Apple Music does not expose track duration"
+-          horizontalAlignment: Text.AlignHCenter
+-          color: Qt.darker(root.popupForeground, 1.6)
++          id: cogBtn
++          anchors.right: parent.right
++          anchors.bottom: parent.bottom
++          anchors.margins: Style.space(6)
++          z: 3
++          text: root.cogIcon
++          color: Qt.darker(root.popupForeground, 2.1)
+           font.family: root.popupFontFamily
+           font.pixelSize: Style.font.caption
++          opacity: 0.5
++          Accessible.role: Accessible.Button
++          Accessible.name: "Miniplayer settings"
++          MouseArea {
++            anchors.fill: parent
++            anchors.margins: -Style.space(6)
++            hoverEnabled: true
++            cursorShape: Qt.PointingHandCursor
++            onClicked: root.settingsOpen = !root.settingsOpen
++          }
+         }
        }
  
 -      Row {
