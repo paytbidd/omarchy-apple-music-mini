@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..d225343 100644
+index c97d961..21caaaf 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,7 +1119,7 @@ index c97d961..d225343 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,8 +606,146 @@ function handleCommand(payload) {
+@@ -578,8 +606,148 @@ function handleCommand(payload) {
    }
  }
  
@@ -1133,7 +1133,9 @@ index c97d961..d225343 100644
 +  "[data-testid=\"native-cta\"],.native-cta{display:none !important;}" +
 +  // Top Picks / mix tiles loop HLS via amp-ambient-video. Under Wayland +
 +  // 75% page zoom those GPU video textures smear. Keep the static poster.
-+  "amp-ambient-video,.editorial-video video,[data-testid=\"ambient-video-player\"]{display:none !important;}"
++  "amp-ambient-video,.editorial-video video,[data-testid=\"ambient-video-player\"]{display:none !important;}" +
++  // Default sidebar is 260px; pull it in ~32px.
++  "[data-testid=\"header\"].header,nav.navigation[data-testid=\"navigation\"]{width:228px !important;max-width:228px !important;min-width:0 !important;flex-basis:228px !important;}"
 +
 +function hideAppleMusicScrollbars() {
 +  if (typeof document === "undefined") return
@@ -1267,7 +1269,7 @@ index c97d961..d225343 100644
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
  
-@@ -617,6 +783,15 @@ if (typeof module !== "undefined") {
+@@ -617,6 +785,15 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
@@ -1446,10 +1448,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..edb4bdb 100644
+index b8c71e4..6b6af22 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,31 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,32 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1466,6 +1468,7 @@ index b8c71e4..edb4bdb 100644
 +assert.equal(typeof bridge.hideAppleMusicScrollbars, "function")
 +assert.equal(bridge.PAGE_CHROME_CSS.indexOf("native-cta") !== -1, true)
 +assert.equal(bridge.PAGE_CHROME_CSS.indexOf("amp-ambient-video") !== -1, true)
++assert.equal(bridge.PAGE_CHROME_CSS.indexOf("228px") !== -1, true)
 +bridge.hideAppleMusicScrollbars()
 +const store = {
 +  data: {},
