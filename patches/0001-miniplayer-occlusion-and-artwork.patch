@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..acde8fc 100644
+index c97d961..ef269d5 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,7 +1119,7 @@ index c97d961..acde8fc 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,8 +606,266 @@ function handleCommand(payload) {
+@@ -578,8 +606,257 @@ function handleCommand(payload) {
    }
  }
  
@@ -1248,11 +1248,6 @@ index c97d961..acde8fc 100644
 +
 +function watchPlaylistsToggle() {
 +  ensurePlaylistsToggle()
-+  if (typeof MutationObserver === "undefined" || !document.documentElement) return
-+  if (window.__omarchyPlaylistsObserver) return
-+  var observer = new MutationObserver(function() { ensurePlaylistsToggle() })
-+  observer.observe(document.documentElement, { childList: true, subtree: true })
-+  window.__omarchyPlaylistsObserver = observer
 +}
 +
 +var SYSTEM_FONT_KEY = "omarchy-apple-music-system-font"
@@ -1357,18 +1352,14 @@ index c97d961..acde8fc 100644
 +    existing = item
 +  }
 +  label = existing.querySelector(".contextual-menu-item__option-text")
-+  if (label) label.textContent = readSystemFont() ? "System font ✓" : "System font"
++  var nextLabel = readSystemFont() ? "System font ✓" : "System font"
++  if (label && label.textContent !== nextLabel) label.textContent = nextLabel
 +  return true
 +}
 +
 +function watchSystemFontMenu() {
 +  applySystemFont()
 +  ensureSystemFontMenuItem()
-+  if (typeof MutationObserver === "undefined" || !document.documentElement) return
-+  if (window.__omarchySystemFontObserver) return
-+  var observer = new MutationObserver(function() { ensureSystemFontMenuItem() })
-+  observer.observe(document.documentElement, { childList: true, subtree: true })
-+  window.__omarchySystemFontObserver = observer
 +}
 +
  if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -1387,7 +1378,7 @@ index c97d961..acde8fc 100644
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
  
-@@ -617,6 +903,19 @@ if (typeof module !== "undefined") {
+@@ -617,6 +894,19 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
@@ -1450,7 +1441,7 @@ index 0000000..5c7005f
 +  chrome.tabs.setZoom(0.75)
 +})()
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..7569558 100755
+index ed6f8fb..d63dee7 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
 @@ -14,6 +14,7 @@ EXTENSION_DIR="$PLUGIN_DIR/extension/chromium"
@@ -1461,7 +1452,7 @@ index ed6f8fb..7569558 100755
  
  window() {
    hyprctl clients -j 2>/dev/null | jq -c --arg class "$APP_CLASS" \
-@@ -27,10 +28,17 @@ pid() {
+@@ -27,12 +28,22 @@ pid() {
  }
  
  focus() {
@@ -1470,17 +1461,24 @@ index ed6f8fb..7569558 100755
    client=$(window || true)
    [[ -n $client ]] || return 1
    address=$(jq -r '.address' <<<"$client")
+-  hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
+-    hyprctl dispatch focuswindow "address:$address" >/dev/null
 +  name=$(jq -r '.workspace.name' <<<"$client")
 +  workspace=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id')
-+  # Unstash onto the current workspace so Super+W hides it the same way
-+  # as a manual launch, instead of only revealing the scratchpad overlay.
-+  if [[ ${name:-} == special:* && ${workspace:-} != "" && ${workspace:-} != "null" ]]; then
-+    hyprctl dispatch movetoworkspace "$workspace,address:$address" >/dev/null 2>&1 || true
++  # Always pull it onto the current tiled workspace. Focusing a scratchpad
++  # window only reveals the overlay, which does not feel like a normal open.
++  if [[ ${workspace:-} != "" && ${workspace:-} != "null" ]]; then
++    hyprctl dispatch movetoworkspace "$workspace,address:$address" >/dev/null 2>&1 ||
++      hyprctl dispatch "hl.dsp.window.move({ workspace = \"$workspace\", window = \"address:$address\" })" >/dev/null 2>&1 ||
++      true
 +  fi
-   hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
-     hyprctl dispatch focuswindow "address:$address" >/dev/null
++  hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 ||
++    hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
++    true
  }
-@@ -46,16 +54,102 @@ browser() {
+ 
+ browser() {
+@@ -46,16 +57,102 @@ browser() {
    fi
  }
  
@@ -1584,7 +1582,7 @@ index ed6f8fb..7569558 100755
      --remote-debugging-port=0 \
      --app="$APP_URL"
  }
-@@ -96,9 +190,10 @@ case "${1:-open}" in
+@@ -96,9 +193,10 @@ case "${1:-open}" in
    focus) focus ;;
    pid) pid ;;
    install) install_launcher ;;
