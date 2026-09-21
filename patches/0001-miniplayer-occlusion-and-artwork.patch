@@ -74,7 +74,7 @@ index 0d8dd44..d482a33 100644
      historyPlaybackDescriptor: historyPlaybackDescriptor,
      parseHistoryLines: parseHistoryLines,
 diff --git a/AppleMusicService.qml b/AppleMusicService.qml
-index f1e45e6..3b01327 100644
+index f1e45e6..4d71717 100644
 --- a/AppleMusicService.qml
 +++ b/AppleMusicService.qml
 @@ -59,14 +59,23 @@ Item {
@@ -119,7 +119,19 @@ index f1e45e6..3b01327 100644
    readonly property real position: {
      positionRevision
      return available && activePlayer.positionSupported
-@@ -221,20 +235,31 @@ Item {
+@@ -100,6 +114,11 @@ Item {
+     Quickshell.execDetached([launcherPath, "install"])
+   }
+ 
++  function setSystemFont(enabled) {
++    Quickshell.execDetached([launcherPath, "set-font-pref", enabled ? "on" : "off"])
++    sendBridgeCommand({ action: "set-system-font", enabled: !!enabled })
++  }
++
+   function sendBridgeCommand(command) {
+     if (!bridgeActive) return
+     commandSequence += 1
+@@ -221,20 +240,31 @@ Item {
    // before the entry is written, and lastHistoryKey collapses the result.
    onTitleChanged: historyLogTimer.restart()
  
@@ -156,10 +168,18 @@ index f1e45e6..3b01327 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..48f65c3 100644
+index 94924a8..0a78078 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
-@@ -35,6 +35,8 @@ BarWidget {
+@@ -18,6 +18,7 @@ BarWidget {
+   readonly property bool showQueue: setting("showQueue", true)
+   readonly property bool showRecentlyPlayed: setting("showRecentlyPlayed", true)
+   readonly property bool showPlaybackModes: setting("showPlaybackModes", true)
++  readonly property bool systemFont: setting("systemFont", false)
+   // Nerd Font nf-md glyphs, resolved from CaskaydiaMono Nerd Font's cmap:
+   // md-heart, md-heart_outline, md-thumb_down, md-thumb_down_outline
+   readonly property string heartIcon: String.fromCodePoint(0xf02d1)
+@@ -35,6 +36,8 @@ BarWidget {
    readonly property string clockOutlineIcon: String.fromCodePoint(0xf0465)
    readonly property string alertIcon: String.fromCodePoint(0xf0292)
    readonly property string autoplayIcon: String.fromCodePoint(0xf0ab5)
@@ -168,7 +188,7 @@ index 94924a8..48f65c3 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -56,6 +58,16 @@ BarWidget {
+@@ -56,6 +59,18 @@ BarWidget {
    function open() { popupOpen = true }
    function close() { popupOpen = false }
    function toggle() { popupOpen = !popupOpen }
@@ -176,6 +196,8 @@ index 94924a8..48f65c3 100644
 +    popupOpen = false
 +    if (music) music.openAppleMusic()
 +  }
++
++  onSystemFontChanged: if (music) music.setSystemFont(systemFont)
 +  readonly property int miniMaxHeight: {
 +    var avail = popup.availableCardHeight
 +    var cap = Style.space(640)
@@ -185,7 +207,7 @@ index 94924a8..48f65c3 100644
  
    // Last artwork URL that decoded successfully. Chromium hands MPRIS a new
    // /tmp artwork file several times per track switch and deletes the old
-@@ -263,90 +275,246 @@ BarWidget {
+@@ -263,90 +278,246 @@ BarWidget {
      }
    }
  
@@ -495,7 +517,7 @@ index 94924a8..48f65c3 100644
  
            Text {
              width: parent.width
-@@ -361,7 +529,9 @@ BarWidget {
+@@ -361,7 +532,9 @@ BarWidget {
  
            Text {
              width: parent.width
@@ -506,7 +528,7 @@ index 94924a8..48f65c3 100644
              textFormat: Text.PlainText
              visible: text !== ""
              color: Qt.darker(root.popupForeground, 1.3)
-@@ -369,352 +539,259 @@ BarWidget {
+@@ -369,352 +542,259 @@ BarWidget {
              font.pixelSize: Style.font.body
              elide: Text.ElideRight
            }
@@ -1074,7 +1096,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..ef269d5 100644
+index c97d961..1dfb914 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,7 +1141,21 @@ index c97d961..ef269d5 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,8 +606,257 @@ function handleCommand(payload) {
+@@ -500,6 +528,13 @@ function setRating(music, item, value) {
+ function handleCommand(payload) {
+   try {
+     var action = payload && payload.action
++    if (action === "set-system-font") {
++      var enabled = payload && payload.enabled === true
++      if (typeof window !== "undefined") window.__omarchySystemFontEnabled = enabled
++      writeSystemFont(enabled)
++      applySystemFont()
++      return Promise.resolve({ ok: true })
++    }
+     var music = window.MusicKit && window.MusicKit.getInstance
+       ? window.MusicKit.getInstance() : null
+     if (!music) return Promise.resolve({ ok: false, error: "no-musickit" })
+@@ -578,8 +613,218 @@ function handleCommand(payload) {
    }
  }
  
@@ -1253,6 +1289,10 @@ index c97d961..ef269d5 100644
 +var SYSTEM_FONT_KEY = "omarchy-apple-music-system-font"
 +
 +function readSystemFont(storage) {
++  if (typeof window !== "undefined") {
++    if (window.__omarchySystemFontEnabled === true) return true
++    if (window.__omarchySystemFontEnabled === false) return false
++  }
 +  try {
 +    return String((storage || localStorage).getItem(SYSTEM_FONT_KEY) || "") === "1"
 +  } catch (_) {
@@ -1316,50 +1356,8 @@ index c97d961..ef269d5 100644
 +  style.textContent = systemFontCSS(systemFontFamily())
 +}
 +
-+function ensureSystemFontMenuItem() {
-+  if (typeof document === "undefined") return false
-+  var list = document.querySelector(".contextual-menu__list")
-+  if (!list) return false
-+  var existing = list.querySelector("[data-omarchy-system-font]")
-+  var label
-+  if (!existing) {
-+    var item = document.createElement("li")
-+    item.className = "contextual-menu-item"
-+    item.setAttribute("data-omarchy-system-font", "1")
-+    item.innerHTML =
-+      '<button type="button">' +
-+        '<span class="contextual-menu-item__option-wrapper">' +
-+          '<span class="contextual-menu-item__option-text"></span>' +
-+        "</span>" +
-+      "</button>"
-+    var signOut = null
-+    var items = list.querySelectorAll(".contextual-menu-item")
-+    for (var i = 0; i < items.length; i++) {
-+      if (/sign out/i.test(items[i].textContent || "")) {
-+        signOut = items[i]
-+        break
-+      }
-+    }
-+    if (signOut) list.insertBefore(item, signOut)
-+    else list.appendChild(item)
-+    item.querySelector("button").addEventListener("click", function(event) {
-+      event.preventDefault()
-+      event.stopPropagation()
-+      writeSystemFont(!readSystemFont())
-+      applySystemFont()
-+      ensureSystemFontMenuItem()
-+    })
-+    existing = item
-+  }
-+  label = existing.querySelector(".contextual-menu-item__option-text")
-+  var nextLabel = readSystemFont() ? "System font ✓" : "System font"
-+  if (label && label.textContent !== nextLabel) label.textContent = nextLabel
-+  return true
-+}
-+
 +function watchSystemFontMenu() {
 +  applySystemFont()
-+  ensureSystemFontMenuItem()
 +}
 +
  if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -1373,12 +1371,11 @@ index c97d961..ef269d5 100644
 +    bridgeAppleMusicDuration()
 +    ensurePlaylistsToggle()
 +    quietAmbientVideos()
-+    ensureSystemFontMenuItem()
 +  }, 1000)
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
  
-@@ -617,6 +894,19 @@ if (typeof module !== "undefined") {
+@@ -617,6 +862,19 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
@@ -1440,19 +1437,57 @@ index 0000000..5c7005f
 +  }
 +  chrome.tabs.setZoom(0.75)
 +})()
+diff --git a/manifest.json b/manifest.json
+index 67957ed..19336a5 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -2,7 +2,7 @@
+   "schemaVersion": 1,
+   "id": "iuliansafta.apple-music",
+   "name": "Apple Music",
+-  "version": "0.3.3",
++  "version": "0.3.4",
+   "author": "Iulian Safta",
+   "description": "Apple Music web player controls and now-playing information for the Omarchy bar.",
+   "homepage": "https://github.com/iuliansafta/omarchy-apple-music",
+@@ -28,7 +28,8 @@
+       "maxLabelWidth": 220,
+       "showQueue": true,
+       "showPlaybackModes": true,
+-      "showRecentlyPlayed": true
++      "showRecentlyPlayed": true,
++      "systemFont": false
+     },
+     "schema": [
+       {
+@@ -71,6 +72,13 @@
+         "type": "boolean",
+         "label": "Show recently played",
+         "defaultValue": true
++      },
++      {
++        "key": "systemFont",
++        "type": "boolean",
++        "label": "Use Omarchy system font",
++        "defaultValue": false,
++        "description": "Apply the current Omarchy font to the Apple Music window, with a slightly stronger sidebar hover."
+       }
+     ]
+   }
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..d63dee7 100755
+index ed6f8fb..413cd9d 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
-@@ -14,6 +14,7 @@ EXTENSION_DIR="$PLUGIN_DIR/extension/chromium"
+@@ -14,6 +14,8 @@ EXTENSION_DIR="$PLUGIN_DIR/extension/chromium"
  ICON_SOURCE="$PLUGIN_DIR/assets/apple-music.svg"
  ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
  ICON_FILE="$ICON_DIR/$APP_ID.svg"
 +FONT_EXT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$APP_ID/font-ext"
++PREFS_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/$APP_ID/prefs.json"
  
  window() {
    hyprctl clients -j 2>/dev/null | jq -c --arg class "$APP_CLASS" \
-@@ -27,12 +28,22 @@ pid() {
+@@ -27,12 +29,22 @@ pid() {
  }
  
  focus() {
@@ -1478,7 +1513,7 @@ index ed6f8fb..d63dee7 100755
  }
  
  browser() {
-@@ -46,16 +57,102 @@ browser() {
+@@ -46,16 +58,134 @@ browser() {
    fi
  }
  
@@ -1487,10 +1522,17 @@ index ed6f8fb..d63dee7 100755
 +  font=$(omarchy font current 2>/dev/null || true)
 +  [[ -n $font ]] || return 0
 +  mkdir -p "$FONT_EXT_DIR"
-+  python3 - "$FONT_EXT_DIR" "$font" <<'PY'
++  python3 - "$FONT_EXT_DIR" "$font" "$PREFS_FILE" <<'PY'
 +import json, pathlib, sys
 +directory = pathlib.Path(sys.argv[1])
 +font = sys.argv[2]
++prefs_path = pathlib.Path(sys.argv[3])
++enabled = False
++if prefs_path.is_file():
++    try:
++        enabled = json.loads(prefs_path.read_text(encoding="utf-8")).get("systemFont") is True
++    except Exception:
++        enabled = False
 +(directory / "manifest.json").write_text(json.dumps({
 +    "manifest_version": 3,
 +    "name": "Omarchy font name",
@@ -1503,10 +1545,35 @@ index ed6f8fb..d63dee7 100755
 +    }]
 +}, indent=2) + "\n", encoding="utf-8")
 +(directory / "font-name.js").write_text(
-+    "window.__omarchyFontFamily = " + json.dumps(font) + ";\n",
++    "window.__omarchyFontFamily = " + json.dumps(font) + ";\n"
++    "window.__omarchySystemFontEnabled = " + ("true" if enabled else "false") + ";\n",
 +    encoding="utf-8",
 +)
 +PY
++}
++
++set_font_pref() {
++  local enabled=false
++  case "${1:-}" in
++    on | true | 1) enabled=true ;;
++  esac
++  mkdir -p "$(dirname "$PREFS_FILE")"
++  python3 - "$PREFS_FILE" "$enabled" <<'PY'
++import json, pathlib, sys
++path = pathlib.Path(sys.argv[1])
++enabled = sys.argv[2] == "true"
++data = {}
++if path.is_file():
++    try:
++        data = json.loads(path.read_text(encoding="utf-8"))
++    except Exception:
++        data = {}
++if not isinstance(data, dict):
++    data = {}
++data["systemFont"] = enabled
++path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
++PY
++  ensure_font_ext
 +}
 +
 +extension_load_path() {
@@ -1582,15 +1649,16 @@ index ed6f8fb..d63dee7 100755
      --remote-debugging-port=0 \
      --app="$APP_URL"
  }
-@@ -96,9 +193,10 @@ case "${1:-open}" in
+@@ -96,9 +226,11 @@ case "${1:-open}" in
    focus) focus ;;
    pid) pid ;;
    install) install_launcher ;;
 +  refresh-font) ensure_font_ext ;;
++  set-font-pref) set_font_pref "${2:-off}" ;;
    is-installed) [[ -f $DESKTOP_FILE ]] ;;
    *)
 -    echo "Usage: $0 {open|focus|pid|install|is-installed}" >&2
-+    echo "Usage: $0 {open|focus|pid|install|refresh-font|is-installed}" >&2
++    echo "Usage: $0 {open|focus|pid|install|refresh-font|set-font-pref|is-installed}" >&2
      exit 2
      ;;
  esac
@@ -1627,10 +1695,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..7347864 100644
+index b8c71e4..aff5967 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,39 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,41 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1667,6 +1735,8 @@ index b8c71e4..7347864 100644
 +assert.equal(fontCss.indexOf("iA Writer Mono S") !== -1, true)
 +assert.equal(fontCss.indexOf("92%") !== -1, true)
 +assert.equal(fontCss.indexOf("navigation-item__link:hover") !== -1, true)
++const fontCmd = bridge.handleCommand({ action: "set-system-font", enabled: true })
++assert.equal(typeof fontCmd.then, "function")
  assert.equal(bridge.normalizeQueueEntry(null, 0), null)
  assert.equal(bridge.normalizeQueueEntry({ attributes: {} }, 0), null)
  
