@@ -155,22 +155,6 @@ reload_shell() {
   omarchy restart shell >/dev/null 2>&1 || true
 }
 
-install_font_hook() {
-  local hook_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/font-set.d"
-  local hook="$hook_dir/apple-music-mini"
-  mkdir -p "$hook_dir"
-  cat >"$hook" <<HOOK
-#!/bin/bash
-# Refresh Apple Music Mini's system-font name after \`omarchy font set\`.
-exec "$UPSTREAM_DIR/scripts/apple-music" refresh-font "\$@"
-HOOK
-  chmod +x "$hook"
-}
-
-remove_font_hook() {
-  rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/font-set.d/apple-music-mini"
-}
-
 cmd_quit() {
   local pid=""
   if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
@@ -182,32 +166,6 @@ cmd_quit() {
   fi
   kill "$pid" 2>/dev/null || true
   echo "Stopped Apple Music."
-}
-
-cmd_font() {
-  local mode="${1:-}"
-  local current=false
-  if [[ -f ${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-apple-music/prefs.json ]]; then
-    current=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('systemFont') is True)" \
-      "${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-apple-music/prefs.json" 2>/dev/null || echo false)
-  fi
-  case "$mode" in
-    on | true | 1) "$UPSTREAM_DIR/scripts/apple-music" set-font-pref on ;;
-    off | false | 0) "$UPSTREAM_DIR/scripts/apple-music" set-font-pref off ;;
-    toggle)
-      if [[ $current == True || $current == true ]]; then
-        "$UPSTREAM_DIR/scripts/apple-music" set-font-pref off
-      else
-        "$UPSTREAM_DIR/scripts/apple-music" set-font-pref on
-      fi
-      ;;
-    status | "")
-      echo "system font: $current (toggle in Apple Music widget settings, or: apple-music-mini font on|off)"
-      return 0
-      ;;
-    *) fail "usage: apple-music-mini font {on|off|toggle|status}" ;;
-  esac
-  echo "System font updated. If Apple Music is open, the change applies immediately when the bridge is up; otherwise reopen the window."
 }
 
 cmd_status() {
@@ -239,9 +197,7 @@ cmd_apply() {
   ensure_hypr_snippet
   if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
     "$UPSTREAM_DIR/scripts/apple-music" install >/dev/null || true
-    "$UPSTREAM_DIR/scripts/apple-music" refresh-font >/dev/null || true
   fi
-  install_font_hook
   reload_shell
   echo "Done. Click the Apple Music bar puck, or Super+Space → Apple Music."
 }
@@ -258,7 +214,6 @@ cmd_unapply() {
     echo "Restored stock $UPSTREAM_ID@$(upstream_git rev-parse --short HEAD)"
   fi
   remove_hypr_snippet
-  remove_font_hook
   reload_shell
   if (( purge )); then
     if [[ -d $PLUGINS_DIR/$OVERLAY_ID ]]; then
@@ -299,8 +254,6 @@ Usage: apple-music-mini {apply|unapply [--purge]|update|status}
   unapply           Restore stock upstream files and remove Hyprland rules
   unapply --purge   Also remove the Apple Music Mini overlay plugin
   update            Pull latest Mini patches and latest upstream, then re-apply
-  font on|off|toggle|status
-                    Use the Omarchy system font in the Apple Music window
   quit              Stop the dedicated Apple Music Chromium process
   status            Show whether tweaks are applied
 EOF
@@ -310,7 +263,6 @@ case "${1:-}" in
   apply) cmd_apply ;;
   unapply) cmd_unapply "${2:-}" ;;
   update) cmd_update ;;
-  font) cmd_font "${2:-}" ;;
   quit) cmd_quit ;;
   status) cmd_status ;;
   -h | --help | help) usage ;;
