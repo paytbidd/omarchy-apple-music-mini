@@ -154,6 +154,22 @@ reload_shell() {
   omarchy restart shell >/dev/null 2>&1 || true
 }
 
+install_font_hook() {
+  local hook_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/font-set.d"
+  local hook="$hook_dir/apple-music-mini"
+  mkdir -p "$hook_dir"
+  cat >"$hook" <<HOOK
+#!/bin/bash
+# Refresh Apple Music Mini's system-font name after \`omarchy font set\`.
+exec "$UPSTREAM_DIR/scripts/apple-music" refresh-font "\$@"
+HOOK
+  chmod +x "$hook"
+}
+
+remove_font_hook() {
+  rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/font-set.d/apple-music-mini"
+}
+
 cmd_quit() {
   local pid=""
   if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
@@ -196,7 +212,9 @@ cmd_apply() {
   ensure_hypr_snippet
   if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
     "$UPSTREAM_DIR/scripts/apple-music" install >/dev/null || true
+    "$UPSTREAM_DIR/scripts/apple-music" refresh-font >/dev/null || true
   fi
+  install_font_hook
   reload_shell
   echo "Done. Click the Apple Music bar puck, or Super+Space → Apple Music."
 }
@@ -213,6 +231,7 @@ cmd_unapply() {
     echo "Restored stock $UPSTREAM_ID@$(upstream_git rev-parse --short HEAD)"
   fi
   remove_hypr_snippet
+  remove_font_hook
   reload_shell
   if (( purge )); then
     if [[ -d $PLUGINS_DIR/$OVERLAY_ID ]]; then

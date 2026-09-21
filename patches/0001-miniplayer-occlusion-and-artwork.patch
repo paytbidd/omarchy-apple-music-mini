@@ -1074,7 +1074,7 @@ index 94924a8..48f65c3 100644
      }
    }
 diff --git a/extension/chromium/duration-bridge.js b/extension/chromium/duration-bridge.js
-index c97d961..21caaaf 100644
+index c97d961..acde8fc 100644
 --- a/extension/chromium/duration-bridge.js
 +++ b/extension/chromium/duration-bridge.js
 @@ -185,6 +185,33 @@ function playDescriptor(music, descriptor) {
@@ -1119,7 +1119,7 @@ index c97d961..21caaaf 100644
        library: current && trackId && libraryCache.id === trackId
          ? libraryCache.state : "unknown"
      }
-@@ -578,8 +606,148 @@ function handleCommand(payload) {
+@@ -578,8 +606,266 @@ function handleCommand(payload) {
    }
  }
  
@@ -1255,21 +1255,139 @@ index c97d961..21caaaf 100644
 +  window.__omarchyPlaylistsObserver = observer
 +}
 +
++var SYSTEM_FONT_KEY = "omarchy-apple-music-system-font"
++
++function readSystemFont(storage) {
++  try {
++    return String((storage || localStorage).getItem(SYSTEM_FONT_KEY) || "") === "1"
++  } catch (_) {
++    return false
++  }
++}
++
++function writeSystemFont(enabled, storage) {
++  try {
++    (storage || localStorage).setItem(SYSTEM_FONT_KEY, enabled ? "1" : "0")
++  } catch (_) {}
++}
++
++function systemFontFamily() {
++  var name = typeof window !== "undefined" ? window.__omarchyFontFamily : ""
++  return String(name || "").trim() || "system-ui"
++}
++
++// SF Pro at 13px vs a typical Omarchy mono: shrink ~8% so sidebar labels and
++// lockup titles keep similar visual mass after the family swap (same idea as
++// Grok Bot's inject, plus a scale factor).
++function systemFontCSS(family) {
++  var quoted = JSON.stringify(family || systemFontFamily())
++  return (
++    "html.omarchy-system-font{" +
++      "font-family:" + quoted + ", ui-monospace, monospace !important;" +
++      "font-size: 92% !important;" +
++    "}" +
++    "html.omarchy-system-font body," +
++    "html.omarchy-system-font button," +
++    "html.omarchy-system-font input," +
++    "html.omarchy-system-font textarea," +
++    "html.omarchy-system-font select{" +
++      "font-family: inherit !important;" +
++    "}" +
++    "html.omarchy-system-font *{" +
++      "font-family:" + quoted + ", ui-monospace, monospace !important;" +
++      "letter-spacing: -0.01em;" +
++    "}" +
++    "html.omarchy-system-font .navigation-item__link:hover{" +
++      "background-color: color-mix(in srgb, currentColor 16%, transparent) !important;" +
++    "}"
++  )
++}
++
++function applySystemFont() {
++  if (typeof document === "undefined") return
++  var on = readSystemFont()
++  document.documentElement.classList.toggle("omarchy-system-font", on)
++  var style = document.getElementById("omarchy-system-font-style")
++  if (!on) {
++    if (style) style.textContent = ""
++    return
++  }
++  if (!style) {
++    style = document.createElement("style")
++    style.id = "omarchy-system-font-style"
++    var host = document.head || document.documentElement
++    if (host) host.appendChild(style)
++  }
++  style.textContent = systemFontCSS(systemFontFamily())
++}
++
++function ensureSystemFontMenuItem() {
++  if (typeof document === "undefined") return false
++  var list = document.querySelector(".contextual-menu__list")
++  if (!list) return false
++  var existing = list.querySelector("[data-omarchy-system-font]")
++  var label
++  if (!existing) {
++    var item = document.createElement("li")
++    item.className = "contextual-menu-item"
++    item.setAttribute("data-omarchy-system-font", "1")
++    item.innerHTML =
++      '<button type="button">' +
++        '<span class="contextual-menu-item__option-wrapper">' +
++          '<span class="contextual-menu-item__option-text"></span>' +
++        "</span>" +
++      "</button>"
++    var signOut = null
++    var items = list.querySelectorAll(".contextual-menu-item")
++    for (var i = 0; i < items.length; i++) {
++      if (/sign out/i.test(items[i].textContent || "")) {
++        signOut = items[i]
++        break
++      }
++    }
++    if (signOut) list.insertBefore(item, signOut)
++    else list.appendChild(item)
++    item.querySelector("button").addEventListener("click", function(event) {
++      event.preventDefault()
++      event.stopPropagation()
++      writeSystemFont(!readSystemFont())
++      applySystemFont()
++      ensureSystemFontMenuItem()
++    })
++    existing = item
++  }
++  label = existing.querySelector(".contextual-menu-item__option-text")
++  if (label) label.textContent = readSystemFont() ? "System font ✓" : "System font"
++  return true
++}
++
++function watchSystemFontMenu() {
++  applySystemFont()
++  ensureSystemFontMenuItem()
++  if (typeof MutationObserver === "undefined" || !document.documentElement) return
++  if (window.__omarchySystemFontObserver) return
++  var observer = new MutationObserver(function() { ensureSystemFontMenuItem() })
++  observer.observe(document.documentElement, { childList: true, subtree: true })
++  window.__omarchySystemFontObserver = observer
++}
++
  if (typeof window !== "undefined" && typeof document !== "undefined") {
 -  setInterval(bridgeAppleMusicDuration, 1000)
 +  hideAppleMusicScrollbars()
 +  suppressNativeAppCta()
 +  quietAmbientVideos()
 +  watchPlaylistsToggle()
++  watchSystemFontMenu()
 +  setInterval(function() {
 +    bridgeAppleMusicDuration()
 +    ensurePlaylistsToggle()
 +    quietAmbientVideos()
++    ensureSystemFontMenuItem()
 +  }, 1000)
    document.addEventListener("visibilitychange", bridgeAppleMusicDuration)
    window.addEventListener("pageshow", bridgeAppleMusicDuration)
  
-@@ -617,6 +785,15 @@ if (typeof module !== "undefined") {
+@@ -617,6 +903,19 @@ if (typeof module !== "undefined") {
      queueContext: queueContext,
      upNextEntries: upNextEntries,
      collectBridgeState: collectBridgeState,
@@ -1282,6 +1400,10 @@ index c97d961..21caaaf 100644
 +    readPlaylistsCollapsed: readPlaylistsCollapsed,
 +    writePlaylistsCollapsed: writePlaylistsCollapsed,
 +    playlistsSection: playlistsSection,
++    SYSTEM_FONT_KEY: SYSTEM_FONT_KEY,
++    readSystemFont: readSystemFont,
++    writeSystemFont: writeSystemFont,
++    systemFontCSS: systemFontCSS,
      handleCommand: handleCommand
    }
  }
@@ -1328,10 +1450,18 @@ index 0000000..5c7005f
 +  chrome.tabs.setZoom(0.75)
 +})()
 diff --git a/scripts/apple-music b/scripts/apple-music
-index ed6f8fb..1b5601a 100755
+index ed6f8fb..7569558 100755
 --- a/scripts/apple-music
 +++ b/scripts/apple-music
-@@ -27,10 +27,17 @@ pid() {
+@@ -14,6 +14,7 @@ EXTENSION_DIR="$PLUGIN_DIR/extension/chromium"
+ ICON_SOURCE="$PLUGIN_DIR/assets/apple-music.svg"
+ ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+ ICON_FILE="$ICON_DIR/$APP_ID.svg"
++FONT_EXT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/$APP_ID/font-ext"
+ 
+ window() {
+   hyprctl clients -j 2>/dev/null | jq -c --arg class "$APP_CLASS" \
+@@ -27,10 +28,17 @@ pid() {
  }
  
  focus() {
@@ -1350,10 +1480,45 @@ index ed6f8fb..1b5601a 100755
    hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 ||
      hyprctl dispatch focuswindow "address:$address" >/dev/null
  }
-@@ -46,14 +53,64 @@ browser() {
+@@ -46,16 +54,102 @@ browser() {
    fi
  }
  
++ensure_font_ext() {
++  local font
++  font=$(omarchy font current 2>/dev/null || true)
++  [[ -n $font ]] || return 0
++  mkdir -p "$FONT_EXT_DIR"
++  python3 - "$FONT_EXT_DIR" "$font" <<'PY'
++import json, pathlib, sys
++directory = pathlib.Path(sys.argv[1])
++font = sys.argv[2]
++(directory / "manifest.json").write_text(json.dumps({
++    "manifest_version": 3,
++    "name": "Omarchy font name",
++    "version": "1.0.0",
++    "content_scripts": [{
++        "matches": ["https://music.apple.com/*"],
++        "js": ["font-name.js"],
++        "run_at": "document_start",
++        "world": "MAIN"
++    }]
++}, indent=2) + "\n", encoding="utf-8")
++(directory / "font-name.js").write_text(
++    "window.__omarchyFontFamily = " + json.dumps(font) + ";\n",
++    encoding="utf-8",
++)
++PY
++}
++
++extension_load_path() {
++  if [[ -f $FONT_EXT_DIR/manifest.json ]]; then
++    printf '%s,%s\n' "$EXTENSION_DIR" "$FONT_EXT_DIR"
++  else
++    printf '%s\n' "$EXTENSION_DIR"
++  fi
++}
++
 +ensure_default_zoom() {
 +  python3 - "$PROFILE_DIR/Default/Preferences" <<'PY'
 +import json, math, os, sys
@@ -1402,6 +1567,7 @@ index ed6f8fb..1b5601a 100755
  
    mkdir -p "$PROFILE_DIR"
 +  ensure_default_zoom
++  ensure_font_ext
 +  # Occlusion / backgrounding pauses Apple Music's <audio> when the window
 +  # is on the scratchpad or another workspace. These flags keep playback
 +  # going; Hyprland render_unfocused on this class is the compositor half.
@@ -1413,8 +1579,23 @@ index ed6f8fb..1b5601a 100755
 +    --disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling \
 +    --hide-scrollbars \
      --user-data-dir="$PROFILE_DIR" \
-     --load-extension="$EXTENSION_DIR" \
+-    --load-extension="$EXTENSION_DIR" \
++    --load-extension="$(extension_load_path)" \
      --remote-debugging-port=0 \
+     --app="$APP_URL"
+ }
+@@ -96,9 +190,10 @@ case "${1:-open}" in
+   focus) focus ;;
+   pid) pid ;;
+   install) install_launcher ;;
++  refresh-font) ensure_font_ext ;;
+   is-installed) [[ -f $DESKTOP_FILE ]] ;;
+   *)
+-    echo "Usage: $0 {open|focus|pid|install|is-installed}" >&2
++    echo "Usage: $0 {open|focus|pid|install|refresh-font|is-installed}" >&2
+     exit 2
+     ;;
+ esac
 diff --git a/scripts/bridge-daemon b/scripts/bridge-daemon
 index ffccf12..edb705b 100755
 --- a/scripts/bridge-daemon
@@ -1448,10 +1629,10 @@ index 4dcd127..67ce129 100755
          items = [{"index": i, "id": "i", "title": "t", "artist": "a",
                    "durationSeconds": 1, "evil": "x" * 100000} for i in range(500)]
 diff --git a/tests/duration-bridge.test.js b/tests/duration-bridge.test.js
-index b8c71e4..6b6af22 100644
+index b8c71e4..7347864 100644
 --- a/tests/duration-bridge.test.js
 +++ b/tests/duration-bridge.test.js
-@@ -55,6 +55,32 @@ assert.equal(entry.index, 3)
+@@ -55,6 +55,39 @@ assert.equal(entry.index, 3)
  assert.equal(entry.id, "song-1")
  assert.equal(entry.title, "Up Next Song")
  assert.equal(entry.durationSeconds, 200)
@@ -1481,6 +1662,13 @@ index b8c71e4..6b6af22 100644
 +assert.equal(bridge.readPlaylistsCollapsed(store), true)
 +bridge.writePlaylistsCollapsed(false, store)
 +assert.equal(bridge.readPlaylistsCollapsed(store), false)
++assert.equal(bridge.readSystemFont(store), false)
++bridge.writeSystemFont(true, store)
++assert.equal(bridge.readSystemFont(store), true)
++const fontCss = bridge.systemFontCSS("iA Writer Mono S")
++assert.equal(fontCss.indexOf("iA Writer Mono S") !== -1, true)
++assert.equal(fontCss.indexOf("92%") !== -1, true)
++assert.equal(fontCss.indexOf("navigation-item__link:hover") !== -1, true)
  assert.equal(bridge.normalizeQueueEntry(null, 0), null)
  assert.equal(bridge.normalizeQueueEntry({ attributes: {} }, 0), null)
  
