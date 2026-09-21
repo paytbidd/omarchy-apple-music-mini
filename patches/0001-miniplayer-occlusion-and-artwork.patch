@@ -168,18 +168,25 @@ index f1e45e6..4d71717 100644
  
    Timer {
 diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
-index 94924a8..0a78078 100644
+index 94924a8..aaea2ca 100644
 --- a/AppleMusicWidget.qml
 +++ b/AppleMusicWidget.qml
-@@ -18,6 +18,7 @@ BarWidget {
+@@ -18,6 +18,14 @@ BarWidget {
    readonly property bool showQueue: setting("showQueue", true)
    readonly property bool showRecentlyPlayed: setting("showRecentlyPlayed", true)
    readonly property bool showPlaybackModes: setting("showPlaybackModes", true)
 +  readonly property bool systemFont: setting("systemFont", false)
++  property int artworkSizeOverride: 0
++  readonly property int artworkSize: {
++    var value = root.artworkSizeOverride > 0
++      ? root.artworkSizeOverride : Number(setting("artworkSize", 260))
++    if (!(value > 0)) value = 260
++    return Math.round(Math.max(180, Math.min(420, value)))
++  }
    // Nerd Font nf-md glyphs, resolved from CaskaydiaMono Nerd Font's cmap:
    // md-heart, md-heart_outline, md-thumb_down, md-thumb_down_outline
    readonly property string heartIcon: String.fromCodePoint(0xf02d1)
-@@ -35,6 +36,8 @@ BarWidget {
+@@ -35,6 +43,8 @@ BarWidget {
    readonly property string clockOutlineIcon: String.fromCodePoint(0xf0465)
    readonly property string alertIcon: String.fromCodePoint(0xf0292)
    readonly property string autoplayIcon: String.fromCodePoint(0xf0ab5)
@@ -188,7 +195,7 @@ index 94924a8..0a78078 100644
    readonly property color popupForeground: bar ? bar.foreground : Color.foreground
    readonly property string popupFontFamily: bar ? bar.fontFamily : Style.font.family
    readonly property string trackLabel: {
-@@ -56,6 +59,18 @@ BarWidget {
+@@ -56,6 +66,35 @@ BarWidget {
    function open() { popupOpen = true }
    function close() { popupOpen = false }
    function toggle() { popupOpen = !popupOpen }
@@ -198,16 +205,33 @@ index 94924a8..0a78078 100644
 +  }
 +
 +  onSystemFontChanged: if (music) music.setSystemFont(systemFont)
++
++  function toggleSystemFont() {
++    var next = !root.systemFont
++    Quickshell.execDetached([
++      "omarchy", "bar", "set", "iuliansafta.apple-music", "systemFont",
++      next ? "true" : "false", "--json"
++    ])
++    if (music) music.setSystemFont(next)
++  }
++
++  function setArtworkSize(value) {
++    var next = Math.round(Math.max(180, Math.min(420, Number(value))))
++    root.artworkSizeOverride = next
++    Quickshell.execDetached([
++      "omarchy", "bar", "set", "iuliansafta.apple-music", "artworkSize", String(next)
++    ])
++  }
 +  readonly property int miniMaxHeight: {
 +    var avail = popup.availableCardHeight
-+    var cap = Style.space(640)
++    var cap = Math.max(640, root.artworkSize + 300)
 +    if (avail > 0) return Math.min(cap, Math.round(avail * 0.7))
 +    return cap
 +  }
  
    // Last artwork URL that decoded successfully. Chromium hands MPRIS a new
    // /tmp artwork file several times per track switch and deletes the old
-@@ -263,90 +278,246 @@ BarWidget {
+@@ -263,90 +302,246 @@ BarWidget {
      }
    }
  
@@ -396,7 +420,7 @@ index 94924a8..0a78078 100644
 -      }
 -    }
 +    padding: 0
-+    contentWidth: popup.fittedContentWidth(Style.space(320))
++    contentWidth: popup.fittedContentWidth(root.artworkSize)
 +    contentHeight: popup.fittedContentHeight(content.implicitHeight, root.miniMaxHeight)
  
      Column {
@@ -517,7 +541,7 @@ index 94924a8..0a78078 100644
  
            Text {
              width: parent.width
-@@ -361,7 +532,9 @@ BarWidget {
+@@ -361,7 +556,9 @@ BarWidget {
  
            Text {
              width: parent.width
@@ -528,7 +552,7 @@ index 94924a8..0a78078 100644
              textFormat: Text.PlainText
              visible: text !== ""
              color: Qt.darker(root.popupForeground, 1.3)
-@@ -369,352 +542,259 @@ BarWidget {
+@@ -369,352 +566,325 @@ BarWidget {
              font.pixelSize: Style.font.body
              elide: Text.ElideRight
            }
@@ -751,6 +775,72 @@ index 94924a8..0a78078 100644
 +            enabled: !!root.music && root.music.autoplay !== null
 +            tooltipText: "Autoplay"
 +            onClicked: root.music.setAutoplay(root.music.autoplay !== true)
++          }
++        }
++
++        Row {
++          anchors.horizontalCenter: parent.horizontalCenter
++          spacing: Style.space(12)
++
++          Text {
++            text: root.systemFont ? "System font on" : "System font"
++            color: Qt.darker(root.popupForeground, root.systemFont ? 1.1 : 1.6)
++            font.family: root.popupFontFamily
++            font.pixelSize: Style.font.caption
++            anchors.verticalCenter: parent.verticalCenter
++            Accessible.role: Accessible.Button
++            Accessible.name: root.systemFont ? "Turn off system font" : "Use Omarchy system font"
++
++            MouseArea {
++              anchors.fill: parent
++              hoverEnabled: true
++              cursorShape: Qt.PointingHandCursor
++              onClicked: root.toggleSystemFont()
++            }
++          }
++
++          Text {
++            text: "Art " + root.artworkSize
++            color: Qt.darker(root.popupForeground, 1.6)
++            font.family: root.popupFontFamily
++            font.pixelSize: Style.font.caption
++            anchors.verticalCenter: parent.verticalCenter
++          }
++
++          Text {
++            text: "−"
++            color: root.popupForeground
++            font.family: root.popupFontFamily
++            font.pixelSize: Style.font.body
++            anchors.verticalCenter: parent.verticalCenter
++            Accessible.role: Accessible.Button
++            Accessible.name: "Smaller artwork"
++
++            MouseArea {
++              anchors.fill: parent
++              anchors.margins: -Style.space(4)
++              hoverEnabled: true
++              cursorShape: Qt.PointingHandCursor
++              onClicked: root.setArtworkSize(root.artworkSize - 10)
++            }
++          }
++
++          Text {
++            text: "+"
++            color: root.popupForeground
++            font.family: root.popupFontFamily
++            font.pixelSize: Style.font.body
++            anchors.verticalCenter: parent.verticalCenter
++            Accessible.role: Accessible.Button
++            Accessible.name: "Larger artwork"
++
++            MouseArea {
++              anchors.fill: parent
++              anchors.margins: -Style.space(4)
++              hoverEnabled: true
++              cursorShape: Qt.PointingHandCursor
++              onClicked: root.setArtworkSize(root.artworkSize + 10)
++            }
 +          }
          }
        }
@@ -1438,7 +1528,7 @@ index 0000000..5c7005f
 +  chrome.tabs.setZoom(0.75)
 +})()
 diff --git a/manifest.json b/manifest.json
-index 67957ed..19336a5 100644
+index 67957ed..a6c88a9 100644
 --- a/manifest.json
 +++ b/manifest.json
 @@ -2,7 +2,7 @@
@@ -1450,17 +1540,18 @@ index 67957ed..19336a5 100644
    "author": "Iulian Safta",
    "description": "Apple Music web player controls and now-playing information for the Omarchy bar.",
    "homepage": "https://github.com/iuliansafta/omarchy-apple-music",
-@@ -28,7 +28,8 @@
+@@ -28,7 +28,9 @@
        "maxLabelWidth": 220,
        "showQueue": true,
        "showPlaybackModes": true,
 -      "showRecentlyPlayed": true
 +      "showRecentlyPlayed": true,
-+      "systemFont": false
++      "systemFont": false,
++      "artworkSize": 260
      },
      "schema": [
        {
-@@ -71,6 +72,13 @@
+@@ -71,6 +73,23 @@
          "type": "boolean",
          "label": "Show recently played",
          "defaultValue": true
@@ -1471,6 +1562,16 @@ index 67957ed..19336a5 100644
 +        "label": "Use Omarchy system font",
 +        "defaultValue": false,
 +        "description": "Apply the current Omarchy font to the Apple Music window, with a slightly stronger sidebar hover."
++      },
++      {
++        "key": "artworkSize",
++        "type": "integer",
++        "label": "Miniplayer artwork size",
++        "min": 180,
++        "max": 420,
++        "step": 10,
++        "defaultValue": 260,
++        "description": "Square cover size in the popup, in pixels. 260 matches the album-page artwork in the Apple Music web player."
        }
      ]
    }
