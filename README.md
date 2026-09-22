@@ -14,14 +14,6 @@ Upstream is MIT. This overlay is MIT too.
 
 ## Install
 
-One shot:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/paytbidd/omarchy-apple-music-mini/main/install | bash
-```
-
-Or the Omarchy form, then apply:
-
 ```bash
 omarchy plugin add https://github.com/paytbidd/omarchy-apple-music-mini.git --yes
 ~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini apply
@@ -44,19 +36,14 @@ Tweaks off, keep the stock plugin:
 ~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini unapply
 ```
 
-Tweaks off and remove Mini itself:
+Tweaks off and remove Mini itself. Unapply first so the stock Apple Music plugin is restored, then remove this overlay:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/paytbidd/omarchy-apple-music-mini/main/uninstall | bash
+~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini unapply
+omarchy plugin remove payton.apple-music-mini --yes
 ```
 
-or:
-
-```bash
-~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini unapply --purge
-```
-
-`iuliansafta.apple-music` stays installed either way.
+`unapply --purge` does both of those steps. `iuliansafta.apple-music` stays installed either way.
 
 ## Update
 
