@@ -12,6 +12,15 @@ UPSTREAM_URL="https://github.com/iuliansafta/omarchy-apple-music.git"
 # execute anything else. Bumping UPSTREAM_PIN is a separate reviewed change;
 # update does not follow upstream main.
 UPSTREAM_PIN="e712d0e869ae8e546d88df4980ddaea3d65ca0f4"
+# Reviewed pin of this overlay (paytbidd/omarchy-apple-music-mini).
+# update fetches this exact commit, checks it out detached, verifies
+# rev-parse HEAD, and only then re-execs that checkout's updater.
+# It does not follow this repo's default branch. The pin commit must not
+# fetch this repo. Main 4a59b64489a213834bbbd97e1529fbfff340aa62 still
+# moved the checkout to whatever that remote resolved to, then patched
+# and reloaded; this pin is the reviewed commit that stops that.
+# Bumping OVERLAY_PIN is a separate reviewed change.
+OVERLAY_PIN="4dfd788f92ea241f927214af8f69286c993f9e48"
 SENTINEL="disable-backgrounding-occluded-windows"
 HYPR_MARK_BEGIN="-- apple-music-mini begin"
 HYPR_MARK_END="-- apple-music-mini end"
@@ -99,6 +108,45 @@ checkout_pinned_upstream() {
     upstream_git checkout --quiet --detach "$UPSTREAM_PIN"
   fi
   verify_pinned_checkout
+}
+
+assert_overlay_pin_format() {
+  [[ $OVERLAY_PIN =~ ^[0-9a-f]{40}$ ]] ||
+    fail "OVERLAY_PIN must be a full 40-character lowercase commit SHA"
+}
+
+verify_overlay_pin() {
+  local head
+  assert_overlay_pin_format
+  [[ -d $OVERLAY_DIR/.git ]] || fail "overlay is not a git checkout at $OVERLAY_DIR"
+  head=$(git -C "$OVERLAY_DIR" rev-parse HEAD)
+  [[ $head == "$OVERLAY_PIN" ]] ||
+    fail "refusing to patch or reload $OVERLAY_ID: HEAD $head != pin $OVERLAY_PIN"
+  if git -C "$OVERLAY_DIR" symbolic-ref -q HEAD >/dev/null; then
+    fail "refusing to patch or reload $OVERLAY_ID: checkout is not detached at $OVERLAY_PIN"
+  fi
+}
+
+fetch_overlay_pin() {
+  assert_overlay_pin_format
+  if ! git -C "$OVERLAY_DIR" fetch --quiet origin "$OVERLAY_PIN"; then
+    git -C "$OVERLAY_DIR" fetch --quiet --depth=1 origin "$OVERLAY_PIN" ||
+      fail "failed to fetch overlay pin $OVERLAY_PIN"
+  fi
+  git -C "$OVERLAY_DIR" cat-file -e "${OVERLAY_PIN}^{commit}" >/dev/null 2>&1 ||
+    fail "overlay pin $OVERLAY_PIN is not a commit after fetch"
+}
+
+# Fetch OVERLAY_PIN and leave this overlay detached at that commit.
+# Callers verify again before patching upstream or reloading the shell.
+checkout_pinned_overlay() {
+  fetch_overlay_pin
+  if [[ -n $(git -C "$OVERLAY_DIR" status --porcelain) ]] &&
+    [[ $(git -C "$OVERLAY_DIR" rev-parse HEAD) != "$OVERLAY_PIN" ]]; then
+    fail "$OVERLAY_ID has local changes and is not at pin $OVERLAY_PIN"
+  fi
+  git -C "$OVERLAY_DIR" checkout --quiet --detach "$OVERLAY_PIN"
+  verify_overlay_pin
 }
 
 ensure_upstream() {
@@ -231,6 +279,7 @@ cmd_quit() {
 
 cmd_status() {
   echo "overlay:  $OVERLAY_DIR"
+  echo "overlay pin: $OVERLAY_PIN"
   if [[ -d $OVERLAY_DIR/.git ]]; then
     echo "overlay revision: $(git -C "$OVERLAY_DIR" rev-parse HEAD)"
   fi
@@ -294,17 +343,12 @@ cmd_unapply() {
 
 cmd_update() {
   [[ -d $OVERLAY_DIR/.git ]] || fail "overlay is not a git checkout"
-  # Do not fetch or merge this overlay. A later push to its remote must not
-  # become the patches or the reload. Replacing this checkout is a separate
-  # reviewed change. Upstream stays on UPSTREAM_PIN; moving that pin is a
-  # reviewed edit to this script, not something update does by fetching.
-  ensure_upstream 1
-  apply_patches
-  ensure_hypr_snippet
-  verify_pinned_checkout
-  reload_shell
-  echo "Re-applied Mini tweaks onto pinned upstream $UPSTREAM_PIN."
-  echo "update does not fetch this overlay or move upstream. Bumping UPSTREAM_PIN, or replacing this overlay checkout, is a separate reviewed change."
+  # Pin before reading patches or reloading. The checked-out updater does not
+  # fetch this repo; it only re-applies patches onto UPSTREAM_PIN.
+  checkout_pinned_overlay
+  verify_overlay_pin
+  echo "Checked out $OVERLAY_ID at overlay pin $OVERLAY_PIN."
+  exec "$OVERLAY_DIR/scripts/apple-music-mini" update
 }
 
 usage() {
@@ -314,7 +358,7 @@ Usage: apple-music-mini {apply|unapply [--purge]|update|status}
   apply             Install iuliansafta.apple-music if needed, check out the reviewed pin, patch it, add Hyprland rules
   unapply           Restore stock upstream files and remove Hyprland rules
   unapply --purge   Also remove the Apple Music Mini overlay plugin
-  update            Re-apply Mini patches onto the pinned upstream commit without fetching this overlay
+  update            Check out the reviewed overlay pin and re-apply patches onto the pinned upstream commit
   quit              Stop the dedicated Apple Music Chromium process
   status            Show whether tweaks are applied
 EOF

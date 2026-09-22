@@ -47,13 +47,15 @@ omarchy plugin remove payton.apple-music-mini --yes
 
 ## Update
 
-Re-apply Mini patches onto the pinned upstream commit. This does not fetch or fast-forward this overlay:
+Check out the reviewed overlay pin and re-apply Mini patches onto the pinned upstream commit:
 
 ```bash
 ~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini update
 ```
 
-`update` does not move upstream off `UPSTREAM_PIN`, and it does not fetch this repo. Changing the reviewed upstream pin (`UPSTREAM_PIN` in `scripts/apple-music-mini`), or replacing this overlay checkout, is a separate reviewed change.
+`update` fetches that exact overlay commit (`OVERLAY_PIN` in `scripts/apple-music-mini`), checks it out detached, and continues only when `rev-parse HEAD` matches the pin. It does not follow this repo's default branch. It also does not move upstream off `UPSTREAM_PIN`.
+
+Changing either reviewed pin (`OVERLAY_PIN` or `UPSTREAM_PIN`) is a separate reviewed change.
 
 Do not `omarchy plugin update iuliansafta.apple-music` while Mini is applied — the dirty working tree cannot fast-forward. Use Mini’s `update` instead.
 
