@@ -86,6 +86,11 @@ checkout_pinned_upstream() {
   fetch_upstream_pin
   if (( force )); then
     upstream_git checkout --quiet --force --detach "$UPSTREAM_PIN"
+    # Already sitting on this commit does not clear applied patches, and the
+    # patch adds files. Restore those paths to the pin so update can re-apply.
+    # The target is UPSTREAM_PIN, not a remote branch tip.
+    upstream_git reset --quiet --hard "$UPSTREAM_PIN"
+    upstream_git clean -fdq -- "${PATCHED_FILES[@]}"
   else
     if [[ -n $(upstream_git status --porcelain) ]] &&
       [[ $(upstream_git rev-parse HEAD) != "$UPSTREAM_PIN" ]]; then
@@ -226,6 +231,9 @@ cmd_quit() {
 
 cmd_status() {
   echo "overlay:  $OVERLAY_DIR"
+  if [[ -d $OVERLAY_DIR/.git ]]; then
+    echo "overlay revision: $(git -C "$OVERLAY_DIR" rev-parse HEAD)"
+  fi
   echo "upstream: $UPSTREAM_DIR"
   echo "pin:      $UPSTREAM_PIN"
   if [[ -d $UPSTREAM_DIR/.git ]]; then
@@ -286,24 +294,17 @@ cmd_unapply() {
 
 cmd_update() {
   [[ -d $OVERLAY_DIR/.git ]] || fail "overlay is not a git checkout"
-  # This overlay fast-forwards to its own origin. That fetch is not used for upstream.
-  git -C "$OVERLAY_DIR" fetch --quiet origin HEAD
-  if [[ $(git -C "$OVERLAY_DIR" rev-parse HEAD) != $(git -C "$OVERLAY_DIR" rev-parse FETCH_HEAD) ]]; then
-    git -C "$OVERLAY_DIR" merge --ff-only FETCH_HEAD
-    echo "Updated $OVERLAY_ID."
-  else
-    echo "$OVERLAY_ID is up to date."
-  fi
-
-  # Upstream stays on UPSTREAM_PIN. Moving that pin is a reviewed edit to this
-  # script, not something update does by fetching origin HEAD.
+  # Do not fetch or merge this overlay. A later push to its remote must not
+  # become the patches or the reload. Replacing this checkout is a separate
+  # reviewed change. Upstream stays on UPSTREAM_PIN; moving that pin is a
+  # reviewed edit to this script, not something update does by fetching.
   ensure_upstream 1
   apply_patches
   ensure_hypr_snippet
   verify_pinned_checkout
   reload_shell
   echo "Re-applied Mini tweaks onto pinned upstream $UPSTREAM_PIN."
-  echo "update does not move upstream off this pin. Bumping UPSTREAM_PIN is a separate reviewed change."
+  echo "update does not fetch this overlay or move upstream. Bumping UPSTREAM_PIN, or replacing this overlay checkout, is a separate reviewed change."
 }
 
 usage() {
@@ -313,7 +314,7 @@ Usage: apple-music-mini {apply|unapply [--purge]|update|status}
   apply             Install iuliansafta.apple-music if needed, check out the reviewed pin, patch it, add Hyprland rules
   unapply           Restore stock upstream files and remove Hyprland rules
   unapply --purge   Also remove the Apple Music Mini overlay plugin
-  update            Pull latest Mini patches and re-apply them onto the pinned upstream commit
+  update            Re-apply Mini patches onto the pinned upstream commit without fetching this overlay
   quit              Stop the dedicated Apple Music Chromium process
   status            Show whether tweaks are applied
 EOF
