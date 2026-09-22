@@ -1,0 +1,53 @@
+diff --git a/AppleMusicWidget.qml b/AppleMusicWidget.qml
+index 71af2f8..f3fd595 100644
+--- a/AppleMusicWidget.qml
++++ b/AppleMusicWidget.qml
+@@ -467,6 +467,30 @@ BarWidget {
+       : Math.max(root.artworkSize, 300))
+     contentHeight: popup.fittedContentHeight(content.implicitHeight, root.miniMaxHeight)
+ 
++    // PopupCard rounds its surface but does not clip children to that
++    // curve, so full-bleed artwork paints into the square corners. Mask
++    // the whole popup to the same corner, inset by the border. Only the
++    // corners that sit on the popover curve are cut; an inner edge of the
++    // art (against controls or rows below) stays straight.
++    Item {
++      id: popupClip
++      anchors.fill: parent
++      readonly property real clipRadius: {
++        var spec = popup.borderSpec
++        var inset = Math.max(
++          Border.left(spec), Border.top(spec),
++          Border.right(spec), Border.bottom(spec))
++        return Math.max(0, Style.cornerRadius - inset)
++      }
++      layer.enabled: true
++      layer.smooth: true
++      layer.effect: MultiEffect {
++        maskEnabled: true
++        maskSource: popupCornerMask
++        maskThresholdMin: 0.3
++        maskSpreadAtMin: 0.1
++      }
++
+     Column {
+       id: content
+       width: parent.width
+@@ -930,5 +954,17 @@ BarWidget {
+       }
+       }
+     }
++    }
++
++    Rectangle {
++      id: popupCornerMask
++      anchors.fill: popupClip
++      radius: popupClip.clipRadius
++      color: "white"
++      visible: false
++      antialiasing: true
++      layer.enabled: true
++      layer.smooth: true
++    }
+   }
+ }
