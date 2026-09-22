@@ -7,6 +7,11 @@ set -euo pipefail
 OVERLAY_ID="payton.apple-music-mini"
 UPSTREAM_ID="iuliansafta.apple-music"
 UPSTREAM_URL="https://github.com/iuliansafta/omarchy-apple-music.git"
+# Reviewed pin of iuliansafta/omarchy-apple-music main: v0.3.3 (2026-08-29).
+# apply and update check out this exact commit detached and refuse to patch or
+# execute anything else. Bumping UPSTREAM_PIN is a separate reviewed change;
+# update does not follow upstream main.
+UPSTREAM_PIN="e712d0e869ae8e546d88df4980ddaea3d65ca0f4"
 SENTINEL="disable-backgrounding-occluded-windows"
 HYPR_MARK_BEGIN="-- apple-music-mini begin"
 HYPR_MARK_END="-- apple-music-mini end"
@@ -47,18 +52,68 @@ applied() {
     grep -q "$SENTINEL" "$UPSTREAM_DIR/scripts/apple-music"
 }
 
+assert_pin_format() {
+  [[ $UPSTREAM_PIN =~ ^[0-9a-f]{40}$ ]] ||
+    fail "UPSTREAM_PIN must be a full 40-character lowercase commit SHA"
+}
+
+verify_pinned_checkout() {
+  local head
+  assert_pin_format
+  [[ -d $UPSTREAM_DIR/.git ]] || fail "upstream plugin is not installed at $UPSTREAM_DIR"
+  head=$(upstream_git rev-parse HEAD)
+  [[ $head == "$UPSTREAM_PIN" ]] ||
+    fail "refusing to patch or execute $UPSTREAM_ID: HEAD $head != pin $UPSTREAM_PIN"
+  if upstream_git symbolic-ref -q HEAD >/dev/null; then
+    fail "refusing to patch or execute $UPSTREAM_ID: checkout is not detached at $UPSTREAM_PIN"
+  fi
+}
+
+fetch_upstream_pin() {
+  assert_pin_format
+  if ! upstream_git fetch --quiet origin "$UPSTREAM_PIN"; then
+    upstream_git fetch --quiet --depth=1 origin "$UPSTREAM_PIN" ||
+      fail "failed to fetch upstream pin $UPSTREAM_PIN from $UPSTREAM_URL"
+  fi
+  upstream_git cat-file -e "${UPSTREAM_PIN}^{commit}" >/dev/null 2>&1 ||
+    fail "upstream pin $UPSTREAM_PIN is not a commit after fetch"
+}
+
+# Fetch UPSTREAM_PIN and leave the upstream checkout detached at that commit.
+# force=1 discards worktree changes so update can re-apply patches on the pin.
+checkout_pinned_upstream() {
+  local force=${1:-0}
+  fetch_upstream_pin
+  if (( force )); then
+    upstream_git checkout --quiet --force --detach "$UPSTREAM_PIN"
+  else
+    if [[ -n $(upstream_git status --porcelain) ]] &&
+      [[ $(upstream_git rev-parse HEAD) != "$UPSTREAM_PIN" ]]; then
+      fail "$UPSTREAM_ID has local changes and is not at pin $UPSTREAM_PIN; unapply or update before apply"
+    fi
+    upstream_git checkout --quiet --detach "$UPSTREAM_PIN"
+  fi
+  verify_pinned_checkout
+}
+
 ensure_upstream() {
-  if [[ -d $UPSTREAM_DIR/.git ]]; then
-    return 0
+  local force=${1:-0}
+  local fresh=0
+  if [[ ! -d $UPSTREAM_DIR/.git ]]; then
+    if [[ -e $UPSTREAM_DIR ]]; then
+      fail "upstream plugin exists at $UPSTREAM_DIR but is not a git checkout"
+    fi
+    fresh=1
+    omarchy plugin add "$UPSTREAM_URL" --yes
+    [[ -d $UPSTREAM_DIR/.git ]] || fail "failed to install $UPSTREAM_ID"
   fi
-  if [[ -e $UPSTREAM_DIR ]]; then
-    fail "upstream plugin exists at $UPSTREAM_DIR but is not a git checkout"
-  fi
-  omarchy plugin add "$UPSTREAM_URL" --yes
-  [[ -d $UPSTREAM_DIR/.git ]] || fail "failed to install $UPSTREAM_ID"
-  if ! omarchy plugin list --json 2>/dev/null |
-    jq -e --arg id "$UPSTREAM_ID" 'any(.[]; .id == $id and .state == "enabled")' >/dev/null; then
-    omarchy plugin enable "$UPSTREAM_ID" --section center || true
+  # Pin before enable, patch, or any upstream executable.
+  checkout_pinned_upstream "$force"
+  if (( fresh )); then
+    if ! omarchy plugin list --json 2>/dev/null |
+      jq -e --arg id "$UPSTREAM_ID" 'any(.[]; .id == $id and .state == "enabled")' >/dev/null; then
+      omarchy plugin enable "$UPSTREAM_ID" --section center || true
+    fi
   fi
 }
 
@@ -139,13 +194,14 @@ PY
 
 apply_patches() {
   local patch
+  verify_pinned_checkout
   shopt -s nullglob
   local patches=("$OVERLAY_DIR"/patches/*.patch)
   shopt -u nullglob
   (( ${#patches[@]} > 0 )) || fail "no patches in $OVERLAY_DIR/patches"
   for patch in "${patches[@]}"; do
     git -C "$UPSTREAM_DIR" apply --check "$patch" ||
-      fail "patch does not apply to $UPSTREAM_ID (upstream may have moved on): $patch"
+      fail "patch does not apply to pinned $UPSTREAM_ID ($UPSTREAM_PIN): $patch"
     git -C "$UPSTREAM_DIR" apply "$patch"
   done
 }
@@ -171,8 +227,9 @@ cmd_quit() {
 cmd_status() {
   echo "overlay:  $OVERLAY_DIR"
   echo "upstream: $UPSTREAM_DIR"
+  echo "pin:      $UPSTREAM_PIN"
   if [[ -d $UPSTREAM_DIR/.git ]]; then
-    echo "revision: $(upstream_git rev-parse --short HEAD)"
+    echo "revision: $(upstream_git rev-parse HEAD)"
   else
     echo "revision: (not installed)"
   fi
@@ -192,9 +249,10 @@ cmd_apply() {
       fail "$UPSTREAM_ID has local changes; commit, stash, or reset them before apply"
     fi
     apply_patches
-    echo "Applied Mini tweaks onto $UPSTREAM_ID@$(upstream_git rev-parse --short HEAD)"
+    echo "Applied Mini tweaks onto $UPSTREAM_ID@$(upstream_git rev-parse HEAD)"
   fi
   ensure_hypr_snippet
+  verify_pinned_checkout
   if [[ -x $UPSTREAM_DIR/scripts/apple-music ]]; then
     "$UPSTREAM_DIR/scripts/apple-music" install >/dev/null || true
   fi
@@ -228,6 +286,7 @@ cmd_unapply() {
 
 cmd_update() {
   [[ -d $OVERLAY_DIR/.git ]] || fail "overlay is not a git checkout"
+  # This overlay fast-forwards to its own origin. That fetch is not used for upstream.
   git -C "$OVERLAY_DIR" fetch --quiet origin HEAD
   if [[ $(git -C "$OVERLAY_DIR" rev-parse HEAD) != $(git -C "$OVERLAY_DIR" rev-parse FETCH_HEAD) ]]; then
     git -C "$OVERLAY_DIR" merge --ff-only FETCH_HEAD
@@ -236,24 +295,25 @@ cmd_update() {
     echo "$OVERLAY_ID is up to date."
   fi
 
-  ensure_upstream
-  git -C "$UPSTREAM_DIR" fetch --quiet origin HEAD
-  git -C "$UPSTREAM_DIR" reset --hard FETCH_HEAD
-  echo "Reset $UPSTREAM_ID to $(upstream_git rev-parse --short HEAD)"
+  # Upstream stays on UPSTREAM_PIN. Moving that pin is a reviewed edit to this
+  # script, not something update does by fetching origin HEAD.
+  ensure_upstream 1
   apply_patches
   ensure_hypr_snippet
+  verify_pinned_checkout
   reload_shell
-  echo "Re-applied Mini tweaks onto latest upstream."
+  echo "Re-applied Mini tweaks onto pinned upstream $UPSTREAM_PIN."
+  echo "update does not move upstream off this pin. Bumping UPSTREAM_PIN is a separate reviewed change."
 }
 
 usage() {
   cat <<EOF
 Usage: apple-music-mini {apply|unapply [--purge]|update|status}
 
-  apply             Install/update iuliansafta.apple-music if needed, patch it, add Hyprland rules
+  apply             Install iuliansafta.apple-music if needed, check out the reviewed pin, patch it, add Hyprland rules
   unapply           Restore stock upstream files and remove Hyprland rules
   unapply --purge   Also remove the Apple Music Mini overlay plugin
-  update            Pull latest Mini patches and latest upstream, then re-apply
+  update            Pull latest Mini patches and re-apply them onto the pinned upstream commit
   quit              Stop the dedicated Apple Music Chromium process
   status            Show whether tweaks are applied
 EOF

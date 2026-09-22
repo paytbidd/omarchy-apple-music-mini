@@ -2,7 +2,7 @@
 
 Miniplayer overlay for [Iulian Safta’s Omarchy Apple Music plugin](https://github.com/iuliansafta/omarchy-apple-music).
 
-Install pulls **latest upstream**, then applies Payton’s tweaks. Unapply restores stock.
+Install checks out a reviewed upstream commit, then applies Payton’s tweaks. Unapply restores stock.
 
 Upstream is MIT. This overlay is MIT too.
 
@@ -21,7 +21,7 @@ omarchy plugin add https://github.com/paytbidd/omarchy-apple-music-mini.git --ye
 
 That will:
 
-1. Install or reuse `iuliansafta.apple-music`
+1. Install or reuse `iuliansafta.apple-music` and check out the reviewed pin
 2. Patch it in place (working tree only — upstream git history stays clean)
 3. Add Hyprland `render_unfocused` rules for the Apple Music webapp
 4. Register the dedicated Chromium launcher
@@ -47,11 +47,13 @@ omarchy plugin remove payton.apple-music-mini --yes
 
 ## Update
 
-Grab the latest Mini patches **and** the latest upstream plugin, then re-apply:
+Pull the latest Mini patches and re-apply them onto the pinned upstream commit:
 
 ```bash
 ~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini update
 ```
+
+`update` does not move upstream to a new commit. Changing the reviewed pin (`UPSTREAM_PIN` in `scripts/apple-music-mini`) is a separate reviewed change.
 
 Do not `omarchy plugin update iuliansafta.apple-music` while Mini is applied — the dirty working tree cannot fast-forward. Use Mini’s `update` instead.
 
@@ -82,4 +84,4 @@ o.bind(
 - Omarchy font on the web player is handled by **Omarchy Type** (`payton.type`), not this overlay.
 - To actually stop Chromium: `~/.config/omarchy/plugins/payton.apple-music-mini/scripts/apple-music-mini quit`
 - Unapply restores stock Super+W (close) for Apple Music too.
-- If an upstream Apple Music plugin release does not apply, `update` will say so; file an issue on this repo with the upstream revision.
+- If the pinned upstream commit does not accept the Mini patch, `apply` or `update` will say so; file an issue on this repo with that pin.

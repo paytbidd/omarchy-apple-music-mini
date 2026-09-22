@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-shot install: overlay plugin + latest iuliansafta.apple-music + Mini tweaks.
+# One-shot install: overlay plugin, pinned iuliansafta.apple-music, and Mini tweaks.
 set -euo pipefail
 
 OVERLAY_URL="https://github.com/paytbidd/omarchy-apple-music-mini.git"
