@@ -129,8 +129,10 @@ verify_overlay_pin() {
 
 fetch_overlay_pin() {
   assert_overlay_pin_format
-  if ! git -C "$OVERLAY_DIR" fetch --quiet origin "$OVERLAY_PIN"; then
-    git -C "$OVERLAY_DIR" fetch --quiet --depth=1 origin "$OVERLAY_PIN" ||
+  # Named by URL rather than "origin" so the pin is fetched from this repo
+  # even if the checkout's remote was changed.
+  if ! git -C "$OVERLAY_DIR" fetch --quiet https://github.com/paytbidd/omarchy-apple-music-mini.git "$OVERLAY_PIN"; then
+    git -C "$OVERLAY_DIR" fetch --quiet --depth=1 https://github.com/paytbidd/omarchy-apple-music-mini.git "$OVERLAY_PIN" ||
       fail "failed to fetch overlay pin $OVERLAY_PIN"
   fi
   git -C "$OVERLAY_DIR" cat-file -e "${OVERLAY_PIN}^{commit}" >/dev/null 2>&1 ||
